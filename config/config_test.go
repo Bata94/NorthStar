@@ -20,6 +20,8 @@ func clearEnv() {
 		"NORTHSTAR_UPSTREAM_POOL_IDLE",
 		"NORTHSTAR_LOG_LEVEL",
 		"NORTHSTAR_LOG_MODE",
+		"NORTHSTAR_LOG_DIR",
+		"NORTHSTAR_LOG_RETENTION",
 		"NORTHSTAR_METRICS_ENABLE",
 		"NORTHSTAR_METRICS_PORT",
 	} {
@@ -75,6 +77,12 @@ func TestDefaults(t *testing.T) {
 	}
 	if cfg.MetricsPort != 9153 {
 		t.Errorf("MetricsPort = %d, want 9153", cfg.MetricsPort)
+	}
+	if cfg.LogDir != "." {
+		t.Errorf("LogDir = %s, want .", cfg.LogDir)
+	}
+	if cfg.LogRetention != 7 {
+		t.Errorf("LogRetention = %d, want 7", cfg.LogRetention)
 	}
 }
 
@@ -237,6 +245,8 @@ func TestLogConfig(t *testing.T) {
 	clearEnv()
 	_ = os.Setenv("NORTHSTAR_LOG_LEVEL", "debug")
 	_ = os.Setenv("NORTHSTAR_LOG_MODE", "dev")
+	_ = os.Setenv("NORTHSTAR_LOG_DIR", "/var/log/northstar")
+	_ = os.Setenv("NORTHSTAR_LOG_RETENTION", "30")
 	defer clearEnv()
 
 	cfg := Load()
@@ -245,6 +255,12 @@ func TestLogConfig(t *testing.T) {
 	}
 	if cfg.LogMode != "dev" {
 		t.Errorf("LogMode = %s, want dev", cfg.LogMode)
+	}
+	if cfg.LogDir != "/var/log/northstar" {
+		t.Errorf("LogDir = %s, want /var/log/northstar", cfg.LogDir)
+	}
+	if cfg.LogRetention != 30 {
+		t.Errorf("LogRetention = %d, want 30", cfg.LogRetention)
 	}
 }
 

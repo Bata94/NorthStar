@@ -18,10 +18,10 @@ lint:
 
 clean:
 	rm -rf ./northstar
+	rm -rf ./*.log
 
 check:
   just fmt
   just lint
   just test
   just build
-  just clean

@@ -32,7 +32,7 @@ func main() {
 			logLevel = "warn"
 		}
 	}
-	slog.SetDefault(log.New(logLevel, logMode))
+	slog.SetDefault(log.New(logLevel, logMode, cfg.LogDir, cfg.LogRetention))
 
 	var backend cache.Cache
 	if cfg.CacheAddr != "" {

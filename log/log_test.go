@@ -191,7 +191,7 @@ func TestConsoleHandlerWithGroup(t *testing.T) {
 }
 
 func TestNewDevMode(t *testing.T) {
-	logger := New("debug", "dev")
+	logger := New("debug", "dev", t.TempDir(), 7)
 	if logger == nil {
 		t.Fatal("expected non-nil logger")
 	}
@@ -200,7 +200,7 @@ func TestNewDevMode(t *testing.T) {
 }
 
 func TestNewProdMode(t *testing.T) {
-	logger := New("error", "prod")
+	logger := New("error", "prod", t.TempDir(), 7)
 	if logger == nil {
 		t.Fatal("expected non-nil logger")
 	}

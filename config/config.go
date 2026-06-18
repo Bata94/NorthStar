@@ -28,6 +28,8 @@ type Config struct {
 	UpstreamPoolIdle int
 	LogLevel         string
 	LogMode          string
+	LogDir           string
+	LogRetention     int
 	MetricsEnable    bool
 	MetricsPort      int
 }
@@ -50,6 +52,8 @@ func Load() Config {
 		CacheAddr:    getEnv("NORTHSTAR_CACHE_ADDR", ""),
 		LogLevel:     getEnv("NORTHSTAR_LOG_LEVEL", ""),
 		LogMode:      getEnv("NORTHSTAR_LOG_MODE", ""),
+		LogDir:       getEnv("NORTHSTAR_LOG_DIR", "."),
+		LogRetention: getEnvInt("NORTHSTAR_LOG_RETENTION", 7),
 	}
 
 	if getEnv("NORTHSTAR_DNS_IPV4_DISABLE", "") == "true" {

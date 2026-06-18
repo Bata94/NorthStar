@@ -6,8 +6,10 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -167,7 +169,94 @@ func levelFromString(s string) slog.Level {
 	}
 }
 
-func New(levelStr, mode string) *slog.Logger {
+type rotateWriter struct {
+	mu      sync.Mutex
+	dir     string
+	prefix  string
+	maxAge  time.Duration
+	current *os.File
+	today   string
+}
+
+func newRotateWriter(dir, prefix string, maxAge time.Duration) *rotateWriter {
+	return &rotateWriter{dir: dir, prefix: prefix, maxAge: maxAge}
+}
+
+func (w *rotateWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	now := time.Now()
+	today := now.Format("2006-01-02")
+	if today != w.today || w.current == nil {
+		if err := w.rotate(now); err != nil {
+			return 0, err
+		}
+	}
+
+	return w.current.Write(p)
+}
+
+func (w *rotateWriter) rotate(now time.Time) error {
+	if w.current != nil {
+		if err := w.current.Close(); err != nil {
+			return err
+		}
+	}
+
+	name := fmt.Sprintf("%s-%s.log", w.prefix, now.Format("2006-01-02"))
+	path := filepath.Join(w.dir, name)
+
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+	w.current = f
+	w.today = now.Format("2006-01-02")
+
+	if w.maxAge > 0 {
+		go w.cleanup(now)
+	}
+
+	return nil
+}
+
+func (w *rotateWriter) cleanup(now time.Time) {
+	entries, err := os.ReadDir(w.dir)
+	if err != nil {
+		return
+	}
+
+	prefix := w.prefix + "-"
+	cutoff := now.Add(-w.maxAge)
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), prefix) || !strings.HasSuffix(entry.Name(), ".log") {
+			continue
+		}
+
+		dateStr := strings.TrimSuffix(strings.TrimPrefix(entry.Name(), prefix), ".log")
+		t, err := time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			continue
+		}
+
+		if t.Before(cutoff) {
+			_ = os.Remove(filepath.Join(w.dir, entry.Name()))
+		}
+	}
+}
+
+func (w *rotateWriter) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.current != nil {
+		return w.current.Close()
+	}
+	return nil
+}
+
+func New(levelStr, mode string, logDir string, maxAge int) *slog.Logger {
 	level := levelFromString(levelStr)
 	color := mode == "dev" || mode == "development"
 
@@ -180,9 +269,8 @@ func New(levelStr, mode string) *slog.Logger {
 		mu:    &sync.Mutex{},
 	})
 
-	if f, err := os.OpenFile("northstar.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-		handlers = append(handlers, slog.NewJSONHandler(f, &slog.HandlerOptions{Level: level}))
-	}
+	w := newRotateWriter(logDir, "northstar", time.Duration(maxAge)*24*time.Hour)
+	handlers = append(handlers, slog.NewJSONHandler(w, &slog.HandlerOptions{Level: level}))
 
 	return slog.New(&multiHandler{handlers: handlers})
 }

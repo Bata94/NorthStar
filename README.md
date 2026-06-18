@@ -7,8 +7,10 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/bata94/northstar)](https://goreportcard.com/report/github.com/bata94/northstar)
 
 A lightweight, high-performance recursive DNS forwarder with on-device caching, per-client rate limiting, DNSSEC passthrough, and real-time metrics. Designed to be an alternative to Technitium, AdGuard Home, or Pi-hole for users who want full visibility and control over their DNS infrastructure.
+Plans include a WebUI-driven configuration system, configuration file support, and pure environment-variable operation.
+Multi-node support is architected in and will be added in the future.
 
-Diclaimer: This is a prototype. Alot is AI coded as a proof of concept. I want to get all features in and then I will refactor it to production ready, if it works as intended.
+Disclaimer: This is a prototype. A lot of it is AI-coded as a proof of concept. The goal is to land all features first, then refactor to production quality once the design is validated.
 
 Built for Docker, configured via environment variables, and instrumented with Prometheus out of the box.
 
@@ -27,6 +29,10 @@ Built for Docker, configured via environment variables, and instrumented with Pr
 - **Structured logging** — colored console output in dev mode, JSON file output for production ingestion
 - **Graceful shutdown** — drains in-flight requests up to 5 seconds before exiting
 - **Configurable via environment variables** — no config files needed
+
+## Roadmap
+
+See [Plan.md](./Plan.md), for short-term and long-term goals.
 
 ## Quick Start
 
