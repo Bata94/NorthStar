@@ -1,0 +1,22 @@
+.direnv/
+.env
+*.env
+
+*.log
+
+./*.db
+../*.db
+test*.go
+test-tmp/
+test-temp/
+tmp-test/
+temp-test/
+test-project/
+
+bin/
+tmp/
+# docs/
+northstar
+
+# Local git hooks (auto-configured by just setup-hooks)
+hooks/pre-commit

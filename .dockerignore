@@ -1,0 +1,12 @@
+.git
+.gitignore
+.env
+.envrc
+.direnv
+tmp/
+*.md
+Dockerfile
+Dockerfile.dev
+docker-compose.yml
+.air.toml
+.dockerignore
