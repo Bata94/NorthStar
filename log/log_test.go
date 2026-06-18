@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -187,6 +189,49 @@ func TestConsoleHandlerWithGroup(t *testing.T) {
 
 	if h2 == h {
 		t.Error("WithGroup should return a new handler")
+	}
+}
+
+func TestRotateWriterDateChange(t *testing.T) {
+	dir := t.TempDir()
+
+	day1 := time.Date(2026, 6, 18, 23, 59, 0, 0, time.UTC)
+	day2 := time.Date(2026, 6, 19, 0, 1, 0, 0, time.UTC)
+
+	currentTime := day1
+	w := newRotateWriter(dir, "test", 7*24*time.Hour)
+	w.now = func() time.Time { return currentTime }
+
+	n, err := w.Write([]byte("day1\n"))
+	if n != 5 || err != nil {
+		t.Fatalf("first write: n=%d err=%v", n, err)
+	}
+
+	currentTime = day2
+
+	n, err = w.Write([]byte("day2\n"))
+	if n != 5 || err != nil {
+		t.Fatalf("second write: n=%d err=%v", n, err)
+	}
+
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	b1, err := os.ReadFile(filepath.Join(dir, "test-2026-06-18.log"))
+	if err != nil {
+		t.Fatal("missing day1 file:", err)
+	}
+	if string(b1) != "day1\n" {
+		t.Errorf("day1 content = %q, want %q", string(b1), "day1\n")
+	}
+
+	b2, err := os.ReadFile(filepath.Join(dir, "test-2026-06-19.log"))
+	if err != nil {
+		t.Fatal("missing day2 file:", err)
+	}
+	if string(b2) != "day2\n" {
+		t.Errorf("day2 content = %q, want %q", string(b2), "day2\n")
 	}
 }
 

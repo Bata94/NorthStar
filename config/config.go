@@ -30,6 +30,7 @@ type Config struct {
 	LogMode          string
 	LogDir           string
 	LogRetention     int
+	TimeZone         string
 	MetricsEnable    bool
 	MetricsPort      int
 }
@@ -54,6 +55,7 @@ func Load() Config {
 		LogMode:      getEnv("NORTHSTAR_LOG_MODE", ""),
 		LogDir:       getEnv("NORTHSTAR_LOG_DIR", "."),
 		LogRetention: getEnvInt("NORTHSTAR_LOG_RETENTION", 7),
+		TimeZone:     getEnv("NORTHSTAR_TZ", ""),
 	}
 
 	if getEnv("NORTHSTAR_DNS_IPV4_DISABLE", "") == "true" {

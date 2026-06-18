@@ -176,17 +176,18 @@ type rotateWriter struct {
 	maxAge  time.Duration
 	current *os.File
 	today   string
+	now     func() time.Time
 }
 
 func newRotateWriter(dir, prefix string, maxAge time.Duration) *rotateWriter {
-	return &rotateWriter{dir: dir, prefix: prefix, maxAge: maxAge}
+	return &rotateWriter{dir: dir, prefix: prefix, maxAge: maxAge, now: time.Now}
 }
 
 func (w *rotateWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	now := time.Now()
+	now := w.now()
 	today := now.Format("2006-01-02")
 	if today != w.today || w.current == nil {
 		if err := w.rotate(now); err != nil {

@@ -22,6 +22,7 @@ func clearEnv() {
 		"NORTHSTAR_LOG_MODE",
 		"NORTHSTAR_LOG_DIR",
 		"NORTHSTAR_LOG_RETENTION",
+		"NORTHSTAR_TZ",
 		"NORTHSTAR_METRICS_ENABLE",
 		"NORTHSTAR_METRICS_PORT",
 	} {
@@ -83,6 +84,9 @@ func TestDefaults(t *testing.T) {
 	}
 	if cfg.LogRetention != 7 {
 		t.Errorf("LogRetention = %d, want 7", cfg.LogRetention)
+	}
+	if cfg.TimeZone != "" {
+		t.Errorf("TimeZone = %s, want empty", cfg.TimeZone)
 	}
 }
 
@@ -238,6 +242,17 @@ func TestMode(t *testing.T) {
 	cfg := Load()
 	if cfg.Mode != "dev" {
 		t.Errorf("Mode = %s, want dev", cfg.Mode)
+	}
+}
+
+func TestTimeZone(t *testing.T) {
+	clearEnv()
+	_ = os.Setenv("NORTHSTAR_TZ", "Europe/Berlin")
+	defer clearEnv()
+
+	cfg := Load()
+	if cfg.TimeZone != "Europe/Berlin" {
+		t.Errorf("TimeZone = %s, want Europe/Berlin", cfg.TimeZone)
 	}
 }
 

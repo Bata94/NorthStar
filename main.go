@@ -19,6 +19,14 @@ import (
 func main() {
 	cfg := config.Load()
 
+	if cfg.TimeZone != "" {
+		if loc, err := time.LoadLocation(cfg.TimeZone); err == nil {
+			time.Local = loc
+		} else {
+			panic("invalid timezone: " + err.Error())
+		}
+	}
+
 	logMode := cfg.LogMode
 	if logMode == "" {
 		logMode = cfg.Mode
