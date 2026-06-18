@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Copyright (c) 2026 bata94
 # SPDX-License-Identifier: MIT WITH Commons-Clause
 
