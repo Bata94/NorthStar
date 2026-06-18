@@ -1,3 +1,6 @@
+# Copyright (c) 2026 bata94
+# SPDX-License-Identifier: MIT WITH Commons-Clause
+
 FROM golang:1.26-alpine AS dev
 RUN go install github.com/air-verse/air@latest
 WORKDIR /app

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 bata94
+// SPDX-License-Identifier: MIT WITH Commons-Clause
+
 package resolver
 
 import (

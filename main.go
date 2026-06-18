@@ -1,3 +1,6 @@
+// Copyright (c) 2026 bata94
+// SPDX-License-Identifier: MIT WITH Commons-Clause
+
 package main
 
 import (
@@ -15,6 +18,8 @@ import (
 	"github.com/bata94/northstar/metrics"
 	"github.com/bata94/northstar/resolver"
 )
+
+var Version = "dev"
 
 func main() {
 	cfg := config.Load()
@@ -41,6 +46,7 @@ func main() {
 		}
 	}
 	slog.SetDefault(log.New(logLevel, logMode, cfg.LogDir, cfg.LogRetention))
+	slog.Info("starting northstar", "version", Version)
 
 	var backend cache.Cache
 	if cfg.CacheAddr != "" {
