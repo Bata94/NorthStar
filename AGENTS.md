@@ -7,66 +7,62 @@
 
 ```
 main.go
-  └─ config.Load() → Config{Mode, DNSPort, UpstreamAddr, CacheAddr, Listeners, TcpDisable, RateLimit, StaleAge, UpstreamPoolSize, UpstreamPoolIdle, LogLevel, LogMode, MetricsEnable, MetricsPort}
+  └─ config.Load() → Config{Mode, DNSPort, UpstreamAddr, CacheAddr, Listeners, TcpDisable, RateLimit, StaleAge, UpstreamPoolSize, UpstreamPoolIdle, LogLevel, LogMode, LogDir, LogRetention, TimeZone, MetricsEnable, MetricsPort, ConfigPath, Hooks}
+  │    └─ load YAML file (env NORTHSTAR_CONFIG or ./northstar.yaml)
+  │    └─ overlay env vars on top (env > file > defaults)
+  │    └─ auto-generate default file if missing (main.go pre-flight)
+  └─ config.NewRuntimeConfig(&cfg) → atomic runtime values for SIGHUP reload
+  └─ buildPipeline(&cfg, cache, metrics) → resolver.SetPipeline(p) (atomic swap)
   └─ cache.NewMemory() or cache.NewValkey(addr) → cache.Cache
   └─ log.New(level, mode) → slog.Logger (consoleHandler + JSON file)
   └─ metrics.New() → *metrics.Metrics (custom prometheus registry)
   └─ resolver.NewPool(upstream, udp) + resolver.NewPool(upstream, tcp) → *Pool
-  └─ signal.NotifyContext → ctx
+  └─ signal.NotifyContext → ctx (SIGTERM/SIGINT)
+  └─ signal.Notify → sighupCh (SIGHUP → reload config + rebuild pipeline)
   └─ if MetricsEnable → metrics.Serve(ctx, addr, m) (goroutine)
-  └─ resolver.Serve(ctx, Listener, upstream, cache, rateLimit, staleAge, pool, m)  (× listeners)
-  │    └─ if !TcpDisable → resolver.ServeTCP(ctx, Listener, upstream, cache, rateLimit, staleAge, pool, m)
+  └─ resolver.Serve(ctx, Listener, upstream, cache, staleAge, pool, m, pipeline)  (× listeners)
+  │    └─ if !TcpDisable → resolver.ServeTCP(ctx, Listener, upstream, cache, staleAge, pool, m, pipeline)
   │
   ├─ Serve: UDP read loop (1s deadline for ctx polling)
-  │    └─ go handleRequest(ctx, data, remoteAddr, conn, upstream, cache, rateLimit, staleAge, pool, m)
-  │         ├─ m.ActiveHandlers inc/dec
-  │         ├─ dns.Message.Parse() → Question{Name, Type, Class}
-  │         ├─ guard len(req.Questions) == 0 → silent drop
-  │         ├─ m.QueriesTotal (by qtype)
-  │         ├─ if rateLimit > 0 → cache.Incr(key, 1s) → SERVFAIL if exceeded
-  │         ├─ resolve(ctx, Name, Type, upstream, cache, maxPayload, network, staleAge, pool, do, m)
-  │         │    ├─ m.CacheLookups.Inc()
-  │         │    ├─ cache.Peek(ctx, domain, qtype) → fresh hit → m.CacheHits.Inc(), return
-  │         │    ├─ stale-while-revalidate: if staleAge > 0 && stale.Peek → refreshCache() goroutine, return stale
-  │         │    ├─ inflight dedup: inflightKey{domain,qtype} → wait or become leader
-  │         │    │   └─ on failed inflight call → delete from map, fall through to direct fetch
-  │         │    └─ fetchFromUpstream(ctx, domain, qtype, maxPayload, network, pool, do, m)
-  │         │         ├─ abort goroutine: close upstream conn on ctx.Done()
-  │         │         ├─ m.UpstreamLatency.Observe() (deferred)
-  │         │         ├─ pool.Acquire(ctx) → net.Conn (reuse or Dial)
-  │         │         ├─ SetWriteDeadline(10s) on upstream write
-  │         │         ├─ OPT record with DO bit (0x00008000) → upstream AD bit in entry
-  │         │         ├─ forward query (UDP raw or TCP length-prefixed)
-  │         │         ├─ parse upstream reply → cache.NewEntry(...)
-  │         │         ├─ pool.Release(conn, nil)
-  │         │         ├─ entry.Flags = upstream header (preserves AA/RA/TC)
-  │         │         ├─ entry.RCode = upstream flags & 0x000F
-  │         │         └─ entry.AuthenticData = upstream flags & 0x0020
-  │         ├─ entry.CopyRecordsWithAdjustedTTL() (floors at 1s)
-  │         ├─ build response with OPT addition, AD bit in flags
-  │         ├─ if len(packed) > maxPayload → set TC bit, truncate
-  │         └─ conn.WriteToUDP(packed, remoteAddr)
+  │    └─ go handleRequest(ctx, data, remoteAddr, conn, upstream, cache, staleAge, pool, m, pipeline)
+  │         └─ processQuery(ctx, req, network, clientIP, maxPayload, do, send, upstream, cache, staleAge, pool, m, pipeline)
+  │              ├─ m.QueriesTotal (by qtype)
+  │              ├─ pipeline.Run(PreResolve, hookCtx) → rate limiting via hook
+  │              │    └─ RateLimitHook: cache.Incr(key, 1s) → SERVFAIL if exceeded
+  │              ├─ resolve(ctx, Name, Type, upstream, cache, maxPayload, network, staleAge, pool, do, m)
+  │              │    ├─ m.CacheLookups.Inc()
+  │              │    ├─ cache.Peek(ctx, domain, qtype) → fresh hit → m.CacheHits.Inc(), return
+  │              │    ├─ stale-while-revalidate: if staleAge > 0 && stale.Peek → refreshCache() goroutine, return stale
+  │              │    ├─ inflight dedup: inflightKey{domain,qtype} → wait or become leader
+  │              │    │   └─ on failed inflight call → delete from map, fall through to direct fetch
+  │              │    └─ fetchFromUpstream(ctx, domain, qtype, maxPayload, network, pool, do, m)
+  │              ├─ pipeline.Run(PostResolve, hookCtx)  (noop in Phase 1)
+  │              ├─ entry.CopyRecordsWithAdjustedTTL() → build response
+  │              ├─ pipeline.Run(PreResponse, hookCtx)  (noop in Phase 1)
+  │              ├─ if len(packed) > maxPayload → set TC bit, truncate
+  │              ├─ send(respPacked)
+  │              └─ pipeline.Run(PostResponse, hookCtx)  (noop in Phase 1)
   │
   └─ ServeTCP: TCP accept loop (1s deadline)
-       └─ go handleTCPConnection(ctx, conn, upstream, cache, rateLimit, staleAge, pool, m)
-            ├─ abort goroutine: close client conn on ctx.Done()
-            ├─ SetReadDeadline(10s), SetWriteDeadline(10s) on client conn
-            ├─ 2-byte length prefix + message body (io.ReadFull)
-            ├─ guard len(req.Questions) == 0 → silent drop
-            ├─ (same resolve/fetch flow as UDP)
-            └─ writeTCPResponse(conn, packed) with SetWriteDeadline(10s)
-                 └─ 2-byte length prefix + response data
+       └─ go handleTCPConnection(ctx, conn, upstream, cache, staleAge, pool, m, pipeline)
+            └─ processQuery(...) (same flow as UDP)
 ```
 
 ## Packages
 
 ### `config`
-- Structs: `Config` (17 fields), `Listener`
-- `Load()` reads `.env` (godotenv, no-overwrite) + env vars
-- Env keys: `NORTHSTAR_MODE`, `NORTHSTAR_DNS_PORT`, `NORTHSTAR_UPSTREAM`, `NORTHSTAR_CACHE_ADDR`, `NORTHSTAR_DNS_IPV4_DISABLE`, `NORTHSTAR_DNS_IPV6_DISABLE`, `NORTHSTAR_TCP_DISABLE`, `NORTHSTAR_DNS_RATE_LIMIT`, `NORTHSTAR_DNS_STALE_AGE`, `NORTHSTAR_UPSTREAM_POOL_SIZE`, `NORTHSTAR_UPSTREAM_POOL_IDLE`, `NORTHSTAR_LOG_LEVEL`, `NORTHSTAR_LOG_MODE`, `NORTHSTAR_METRICS_ENABLE`, `NORTHSTAR_METRICS_PORT`
+- Structs: `Config` (17 fields), `Listener`, `HookConfig`, `RateLimitHookConfig`
+- `Load()` reads `.env` (godotenv, no-overwrite) + YAML file + env vars
+- Override hierarchy: defaults < YAML file < environment variables
+- Env keys: `NORTHSTAR_MODE`, `NORTHSTAR_DNS_PORT`, `NORTHSTAR_UPSTREAM`, `NORTHSTAR_CACHE_ADDR`, `NORTHSTAR_DNS_IPV4_DISABLE`, `NORTHSTAR_DNS_IPV6_DISABLE`, `NORTHSTAR_TCP_DISABLE`, `NORTHSTAR_DNS_RATE_LIMIT`, `NORTHSTAR_DNS_STALE_AGE`, `NORTHSTAR_UPSTREAM_POOL_SIZE`, `NORTHSTAR_UPSTREAM_POOL_IDLE`, `NORTHSTAR_LOG_LEVEL`, `NORTHSTAR_LOG_MODE`, `NORTHSTAR_LOG_DIR`, `NORTHSTAR_LOG_RETENTION`, `NORTHSTAR_TZ`, `NORTHSTAR_METRICS_ENABLE`, `NORTHSTAR_METRICS_PORT`, `NORTHSTAR_CONFIG`
 - `CacheAddr` defaults to `""` (in-memory); set to Valkey address for external cache
 - If both v4+v6 enabled → single `::` listener (dual-stack bind)
 - If one disabled → separate listeners for the enabled family
+- `ConfigPath` — path to YAML file (env `NORTHSTAR_CONFIG`, default `./northstar.yaml`)
+- `Load()` auto-generates default YAML file if missing (done in main.go pre-flight)
+- `Reload()` — re-reads config file + env vars for SIGHUP hot-reload
+- `RuntimeConfig` — atomic values for hot-swappable settings (RateLimit, StaleAge, LogLevel, LogMode)
+- `WriteDefaultConfig(path)` — writes a complete YAML file with all defaults and hierarchy explanation header
 
 ### `dns`
 - Wire-format types: `Header`, `Question`, `ResourceRecord`, `Message`
@@ -101,8 +97,18 @@ Default prod level is `warn`, so `Info` and `Debug` are invisible in prod unless
 - **`Info`** — notable operational events visible only when `logLevel=info`: stale-while-revalidate cache behavior, response truncation events, cache backend choice.
 - **`Debug`** — high-frequency per-query tracing: cache hit/miss, query completion, inflight dedup waits. Only visible in dev mode.
 
+### `hooks`
+- `Lifecycle` enum: `PreResolve`, `PostResolve`, `PreResponse`, `PostResponse`
+- `Context` struct carrying request state through the pipeline (`Request`, `Response`, `Entry`, `ClientIP`, `Network`, `Cache`, `Metrics`, `Send`)
+- `Hook` interface: `Name()`, `Lifecycle()`, `Priority()`, `Enabled()`, `Handle(*Context) error`
+- `Pipeline` — thread-safe sorted slices per lifecycle; `Register()` inserts by priority, `Run()` iterates enabled hooks
+- `RateLimitHook` (PreResolve) — replaces the hardcoded rate-limit check; uses `cache.Incr` with second-granularity key; configurable action (`servfail`)
+- Phase 1: only `RateLimitHook` is wired; other lifecycle points are placeholders
+
 ### `resolver`
-- No globals except `inflightCalls` map (package-level, shared across listeners)
+- No globals except `inflightCalls` map and `pipelinePtr` atomic (package-level, shared across listeners)
+- `SetPipeline(p)` — atomically swaps the hook pipeline; called at startup and on SIGHUP reload
+- `processQuery` loads the current pipeline via `pipelinePtr.Load()` on each request, ensuring SIGHUP reloads take effect immediately without race conditions
 - `Serve` (UDP) / `ServeTCP` — accept loops with 1s deadline for ctx polling, graceful drain (5s timeout)
 - `inflightKey{domain, qtype}` / `inflightCall{done, entry, err, once}` — dedup concurrent queries for same domain+qtype; secondary callers wait on `call.done`
 - `refreshCache()` — background goroutine for stale-while-revalidate; fetches from upstream, updates cache, closes `call.done`, deletes from `inflightCalls`

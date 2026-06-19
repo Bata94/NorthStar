@@ -14,6 +14,7 @@ import (
 
 	"github.com/bata94/northstar/cache"
 	"github.com/bata94/northstar/config"
+	"github.com/bata94/northstar/hooks"
 	"github.com/bata94/northstar/log"
 	"github.com/bata94/northstar/metrics"
 	"github.com/bata94/northstar/resolver"
@@ -22,7 +23,20 @@ import (
 var Version = "dev"
 
 func main() {
+	cfgPath := "./northstar.yaml"
+	if v, ok := os.LookupEnv("NORTHSTAR_CONFIG"); ok && v != "" {
+		cfgPath = v
+	}
+
 	cfg := config.Load()
+
+	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
+		if wErr := config.WriteEffectiveConfig(cfgPath, &cfg); wErr != nil {
+			slog.Error("Failed to write default config", "error", wErr)
+		} else {
+			slog.Info("Generated default config file", "path", cfgPath, "mode", cfg.Mode)
+		}
+	}
 
 	if cfg.TimeZone != "" {
 		if loc, err := time.LoadLocation(cfg.TimeZone); err == nil {
@@ -75,8 +89,22 @@ func main() {
 		defer tcpPool.Close()
 	}
 
+	resolver.SetPipeline(buildPipeline(&cfg, backend, m))
+
+	runtimeCfg := config.NewRuntimeConfig(&cfg)
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	sighupCh := make(chan os.Signal, 1)
+	signal.Notify(sighupCh, syscall.SIGHUP)
+
+	go func() {
+		for range sighupCh {
+			slog.Warn("SIGHUP received, reloading config...")
+			reloadConfig(runtimeCfg, backend, m)
+		}
+	}()
 
 	if cfg.MetricsEnable {
 		metricsAddr := fmt.Sprintf(":%d", cfg.MetricsPort)
@@ -95,11 +123,11 @@ func main() {
 	for _, l := range cfg.Listeners {
 		l := l
 		go func() {
-			errChan <- resolver.Serve(ctx, l, cfg.UpstreamAddr, backend, cfg.RateLimit, cfg.StaleAge, udpPool, m)
+			errChan <- resolver.Serve(ctx, l, cfg.UpstreamAddr, backend, cfg.StaleAge, udpPool, m)
 		}()
 		if !cfg.TcpDisable {
 			go func() {
-				errChan <- resolver.ServeTCP(ctx, l, cfg.UpstreamAddr, backend, cfg.RateLimit, cfg.StaleAge, tcpPool, m)
+				errChan <- resolver.ServeTCP(ctx, l, cfg.UpstreamAddr, backend, cfg.StaleAge, tcpPool, m)
 			}()
 		}
 	}
@@ -119,4 +147,55 @@ func main() {
 	}
 
 	slog.Warn("Goodbye.")
+}
+
+func buildPipeline(cfg *config.Config, c cache.Cache, m *metrics.Metrics) *hooks.Pipeline {
+	p := hooks.NewPipeline()
+	for _, h := range buildHooks(cfg, c, m) {
+		p.Register(h)
+	}
+	return p
+}
+
+func reloadConfig(runtimeCfg *config.RuntimeConfig, c cache.Cache, m *metrics.Metrics) {
+	newCfg, err := config.Reload()
+	if err != nil {
+		slog.Error("Config reload failed", "error", err)
+		return
+	}
+	runtimeCfg.ApplyConfig(&newCfg)
+	if newLogLevel, ok := runtimeCfg.LogLevel.Load().(string); ok {
+		newLogMode, _ := runtimeCfg.LogMode.Load().(string)
+		if newLogMode == "" {
+			newLogMode = newCfg.Mode
+		}
+		if newLogLevel == "" {
+			switch newLogMode {
+			case "dev":
+				newLogLevel = "debug"
+			default:
+				newLogLevel = "warn"
+			}
+		}
+		slog.SetDefault(log.New(newLogLevel, newLogMode, newCfg.LogDir, newCfg.LogRetention))
+	}
+	resolver.SetPipeline(buildPipeline(&newCfg, c, m))
+	slog.Warn("Config reloaded")
+}
+
+func buildHooks(cfg *config.Config, c cache.Cache, m *metrics.Metrics) []hooks.Hook {
+	var result []hooks.Hook
+
+	rateCfg := cfg.Hooks.RateLimiting
+	if rateCfg.Rate == 0 && cfg.RateLimit > 0 {
+		rateCfg.Rate = cfg.RateLimit
+	}
+	result = append(result, hooks.NewRateLimitHook(
+		rateCfg.Rate,
+		rateCfg.Action,
+		rateCfg.Priority,
+		rateCfg.Enabled,
+	))
+
+	return result
 }

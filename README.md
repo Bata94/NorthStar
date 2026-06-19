@@ -6,7 +6,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/bata94/northstar.svg)](https://pkg.go.dev/github.com/bata94/northstar)
 [![Go Report Card](https://goreportcard.com/badge/github.com/bata94/northstar)](https://goreportcard.com/report/github.com/bata94/northstar)
 
-A lightweight, high-performance recursive DNS forwarder with on-device caching, per-client rate limiting, DNSSEC passthrough, and real-time metrics. Designed to be an alternative to Technitium, AdGuard Home, or Pi-hole for users who want full visibility and control over their DNS infrastructure.
+A lightweight, high-performance recursive DNS forwarder with on-device caching, per-client rate limiting, DNSSEC passthrough, real-time metrics, and a hook-based middleware pipeline. Designed to be an alternative to Technitium, AdGuard Home, or Pi-hole for users who want full visibility and control over their DNS infrastructure.
 Plans include a WebUI-driven configuration system, configuration file support, and pure environment-variable operation.
 Multi-node support is architected in and will be added in the future.
 
@@ -29,7 +29,7 @@ Built for Docker, configured via environment variables, and instrumented with Pr
 - **Prometheus metrics** — query volume by type, cache hit ratio, upstream latency histogram, error counters, active handler gauge
 - **Structured logging** — colored console output in dev mode, JSON file output for production ingestion
 - **Graceful shutdown** — drains in-flight requests up to 5 seconds before exiting
-- **Configurable via environment variables** — no config files needed
+- **Configurable via YAML file or environment variables** — auto-generates a default config file on first startup; env vars always override file values
 
 ## Roadmap
 
@@ -52,10 +52,29 @@ docker compose up northstar
 
 ## Configuration
 
-All configuration is through environment variables (or a `.env` file in the project root).
+NorthStar supports two configuration sources with a clear override hierarchy:
+
+```
+built-in defaults  <  YAML config file  <  environment variables
+```
+
+**Environment variables always win** — if a restart with different env vars should override a config file value, just set the env var.
+
+### Config file
+
+On first startup, the server auto-generates a default `northstar.yaml` with all settings and explanatory comments. You can edit this file and the server will pick it up on restart (or on `SIGHUP`).
+
+To use a custom path, set `NORTHSTAR_CONFIG`:
+
+```shell
+export NORTHSTAR_CONFIG=/etc/northstar/config.yaml
+```
+
+### Environment variables
 
 | Variable | Default | Description |
 |---|---|---|
+| `NORTHSTAR_CONFIG` | `./northstar.yaml` | Path to YAML config file (auto-generated if missing) |
 | `NORTHSTAR_MODE` | `prod` | Runtime mode. `dev` enables colored console output |
 | `NORTHSTAR_DNS_PORT` | `53` | DNS listener port (UDP and TCP) |
 | `NORTHSTAR_UPSTREAM` | `8.8.8.8:53` | Upstream resolver address |
@@ -69,6 +88,9 @@ All configuration is through environment variables (or a `.env` file in the proj
 | `NORTHSTAR_UPSTREAM_POOL_IDLE` | `30` | Seconds before an idle upstream connection is closed |
 | `NORTHSTAR_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `NORTHSTAR_LOG_MODE` | _(matches MODE)_ | Log mode override. `dev` adds color to console output |
+| `NORTHSTAR_LOG_DIR` | `.` | Log file output directory |
+| `NORTHSTAR_LOG_RETENTION` | `7` | Days to retain log files |
+| `NORTHSTAR_TZ` | _(empty)_ | Timezone (e.g. `Europe/Berlin`) |
 | `NORTHSTAR_METRICS_ENABLE` | `false` | Enable Prometheus metrics endpoint |
 | `NORTHSTAR_METRICS_PORT` | `9153` | Metrics HTTP server port |
 

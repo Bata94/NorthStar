@@ -33,6 +33,10 @@ alias dc := run-docker
 run-docker:
   docker compose down && docker compose up -d --build northstar && docker compose up -d && docker compose logs -f
 
+alias dc-dev := run-docker-dev
+run-docker-dev:
+  docker compose down && docker compose up -d northstar-dev && docker compose logs -f
+
 release-patch:
   just check
   ./scripts/release.sh patch

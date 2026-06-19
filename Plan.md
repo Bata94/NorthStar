@@ -169,10 +169,10 @@
 **Goal:** Unlock configuration-driven operation and clean up the request
 path before piling on features.
 
-- [ ] YAML/TOML config file with env var override hierarchy
+- [X] YAML/TOML config file with env var override hierarchy
   (file < env var < API)
-- [ ] Hot-reload config on SIGHUP
-- [ ] Middleware & Hooks pipeline — refactor hardcoded rate limiting into
+- [X] Hot-reload config on SIGHUP
+- [X] Middleware & Hooks pipeline — refactor hardcoded rate limiting into
   a hook, define lifecycle points (pre-resolve, post-resolve,
   pre-response, post-response) with enable/disable and ordering
 

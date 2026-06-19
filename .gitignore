@@ -17,6 +17,8 @@ bin/
 tmp/
 # docs/
 northstar
+northstar.yaml
+northstar.yml
 
 # Local git hooks (auto-configured by just setup-hooks)
 hooks/pre-commit

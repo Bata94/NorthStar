@@ -28,6 +28,7 @@ func clearEnv() {
 		"NORTHSTAR_TZ",
 		"NORTHSTAR_METRICS_ENABLE",
 		"NORTHSTAR_METRICS_PORT",
+		"NORTHSTAR_CONFIG",
 	} {
 		_ = os.Unsetenv(key)
 	}
@@ -294,5 +295,226 @@ func TestEnvVarPrecedence(t *testing.T) {
 	}
 	if cfg.DNSPort != 8053 {
 		t.Errorf("DNSPort = %d, want 8053", cfg.DNSPort)
+	}
+}
+
+func TestLoadFromFile(t *testing.T) {
+	clearEnv()
+	dir := t.TempDir()
+	cfgPath := dir + "/test.yaml"
+	if err := WriteDefaultConfig(cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Setenv("NORTHSTAR_CONFIG", cfgPath)
+	defer clearEnv()
+
+	cfg := Load()
+	if cfg.Mode != "prod" {
+		t.Errorf("Mode = %s, want prod", cfg.Mode)
+	}
+	if cfg.ConfigPath != cfgPath {
+		t.Errorf("ConfigPath = %s, want %s", cfg.ConfigPath, cfgPath)
+	}
+}
+
+func TestFileEnvOverride(t *testing.T) {
+	clearEnv()
+	dir := t.TempDir()
+	cfgPath := dir + "/test.yaml"
+	if err := WriteDefaultConfig(cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Setenv("NORTHSTAR_CONFIG", cfgPath)
+	_ = os.Setenv("NORTHSTAR_DNS_PORT", "8053")
+	_ = os.Setenv("NORTHSTAR_UPSTREAM", "1.1.1.1:53")
+	defer clearEnv()
+
+	cfg := Load()
+	if cfg.DNSPort != 8053 {
+		t.Errorf("DNSPort = %d, want 8053 (env should override file)", cfg.DNSPort)
+	}
+	if cfg.UpstreamAddr != "1.1.1.1:53" {
+		t.Errorf("UpstreamAddr = %s, want 1.1.1.1:53", cfg.UpstreamAddr)
+	}
+}
+
+func TestWriteDefaultConfigRoundTrip(t *testing.T) {
+	clearEnv()
+	dir := t.TempDir()
+	cfgPath := dir + "/test.yaml"
+	if err := WriteDefaultConfig(cfgPath); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = os.Setenv("NORTHSTAR_CONFIG", cfgPath)
+	defer clearEnv()
+
+	cfg := Load()
+	if cfg.Mode != "prod" {
+		t.Errorf("Mode = %s, want prod", cfg.Mode)
+	}
+	if cfg.DNSPort != 53 {
+		t.Errorf("DNSPort = %d, want 53", cfg.DNSPort)
+	}
+	if cfg.UpstreamAddr != "8.8.8.8:53" {
+		t.Errorf("UpstreamAddr = %s, want 8.8.8.8:53", cfg.UpstreamAddr)
+	}
+	if cfg.RateLimit != 0 {
+		t.Errorf("RateLimit = %d, want 0", cfg.RateLimit)
+	}
+	if cfg.StaleAge != 60 {
+		t.Errorf("StaleAge = %d, want 60", cfg.StaleAge)
+	}
+	if cfg.Hooks.RateLimiting.Priority != 100 {
+		t.Errorf("Hook priority = %d, want 100", cfg.Hooks.RateLimiting.Priority)
+	}
+}
+
+func TestFileOverridesDefaults(t *testing.T) {
+	clearEnv()
+	dir := t.TempDir()
+	cfgPath := dir + "/test.yaml"
+	_ = os.Setenv("NORTHSTAR_CONFIG", cfgPath)
+	defer clearEnv()
+
+	yamlContent := `
+mode: dev
+dns_port: 8053
+upstream: 9.9.9.9:53
+rate_limit: 50
+stale_age: 120
+upstream_pool_size: 20
+upstream_pool_idle: 60
+log_level: debug
+log_mode: dev
+metrics_enable: true
+hooks:
+  rate_limiting:
+    enabled: true
+    priority: 200
+    rate: 100
+    action: drop
+`
+	if err := os.WriteFile(cfgPath, []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Load()
+	if cfg.Mode != "dev" {
+		t.Errorf("Mode = %s, want dev", cfg.Mode)
+	}
+	if cfg.DNSPort != 8053 {
+		t.Errorf("DNSPort = %d, want 8053", cfg.DNSPort)
+	}
+	if cfg.UpstreamAddr != "9.9.9.9:53" {
+		t.Errorf("UpstreamAddr = %s, want 9.9.9.9:53", cfg.UpstreamAddr)
+	}
+	if cfg.RateLimit != 50 {
+		t.Errorf("RateLimit = %d, want 50", cfg.RateLimit)
+	}
+	if cfg.StaleAge != 120 {
+		t.Errorf("StaleAge = %d, want 120", cfg.StaleAge)
+	}
+	if !cfg.MetricsEnable {
+		t.Error("MetricsEnable should be true")
+	}
+	if !cfg.Hooks.RateLimiting.Enabled {
+		t.Error("Hook should be enabled")
+	}
+	if cfg.Hooks.RateLimiting.Priority != 200 {
+		t.Errorf("Hook priority = %d, want 200", cfg.Hooks.RateLimiting.Priority)
+	}
+	if cfg.Hooks.RateLimiting.Action != "drop" {
+		t.Errorf("Hook action = %s, want drop", cfg.Hooks.RateLimiting.Action)
+	}
+}
+
+func TestFileEnvHierarchy(t *testing.T) {
+	clearEnv()
+	dir := t.TempDir()
+	cfgPath := dir + "/test.yaml"
+	_ = os.Setenv("NORTHSTAR_CONFIG", cfgPath)
+	defer clearEnv()
+
+	yamlContent := `
+dns_port: 8053
+upstream: 9.9.9.9:53
+log_level: debug
+`
+	if err := os.WriteFile(cfgPath, []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = os.Setenv("NORTHSTAR_DNS_PORT", "9053")
+	_ = os.Setenv("NORTHSTAR_UPSTREAM", "1.1.1.1:53")
+
+	cfg := Load()
+	// Env overrides file
+	if cfg.DNSPort != 9053 {
+		t.Errorf("DNSPort = %d, want 9053 (env > file)", cfg.DNSPort)
+	}
+	if cfg.UpstreamAddr != "1.1.1.1:53" {
+		t.Errorf("UpstreamAddr = %s, want 1.1.1.1:53 (env > file)", cfg.UpstreamAddr)
+	}
+	// File value used when env not set
+	if cfg.LogLevel != "debug" {
+		t.Errorf("LogLevel = %s, want debug (file > default)", cfg.LogLevel)
+	}
+	// Default used when neither file nor env set
+	if cfg.StaleAge != 60 {
+		t.Errorf("StaleAge = %d, want 60 (default)", cfg.StaleAge)
+	}
+}
+
+func TestReload(t *testing.T) {
+	clearEnv()
+	dir := t.TempDir()
+	cfgPath := dir + "/test.yaml"
+	_ = os.Setenv("NORTHSTAR_CONFIG", cfgPath)
+	defer clearEnv()
+
+	yamlContent := `rate_limit: 50
+stale_age: 120
+`
+	if err := os.WriteFile(cfgPath, []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Reload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RateLimit != 50 {
+		t.Errorf("RateLimit = %d, want 50", cfg.RateLimit)
+	}
+	if cfg.StaleAge != 120 {
+		t.Errorf("StaleAge = %d, want 120", cfg.StaleAge)
+	}
+}
+
+func TestWriteEffectiveConfig(t *testing.T) {
+	clearEnv()
+	dir := t.TempDir()
+	cfgPath := dir + "/test.yaml"
+	_ = os.Setenv("NORTHSTAR_CONFIG", cfgPath)
+	_ = os.Setenv("NORTHSTAR_MODE", "dev")
+	_ = os.Setenv("NORTHSTAR_DNS_PORT", "8053")
+	defer clearEnv()
+
+	cfg := Load()
+
+	if err := WriteEffectiveConfig(cfgPath, &cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	clearEnv()
+	_ = os.Setenv("NORTHSTAR_CONFIG", cfgPath)
+
+	loaded := Load()
+	if loaded.Mode != "dev" {
+		t.Errorf("Mode = %s, want dev (file contains effective value)", loaded.Mode)
+	}
+	if loaded.DNSPort != 8053 {
+		t.Errorf("DNSPort = %d, want 8053 (file contains effective value)", loaded.DNSPort)
 	}
 }
