@@ -11,6 +11,7 @@ Plans include a WebUI-driven configuration system, configuration file support, a
 Multi-node support is architected in and will be added in the future.
 
 Disclaimer: This is a prototype. A lot of it is AI-coded as a proof of concept. The goal is to land all features first, then refactor to production quality once the design is validated.
+Until v1.0.0 changes are rapid and not checked for backwards-compatibility! Development will be simply done in the main branch. After v1.0.0, I will move to feature branches with stable patch releases and potentially breaking changes in minor/major releases.
 
 Built for Docker, configured via environment variables, and instrumented with Prometheus out of the box.
 

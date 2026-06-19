@@ -34,10 +34,13 @@ run-docker:
   docker compose down && docker compose up -d --build northstar && docker compose up -d && docker compose logs -f
 
 release-patch:
+  just check
 	./scripts/release.sh patch
 
 release-minor:
+  just check
 	./scripts/release.sh minor
 
 release-major:
+  just check
 	./scripts/release.sh major
