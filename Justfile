@@ -35,12 +35,12 @@ run-docker:
 
 release-patch:
   just check
-	./scripts/release.sh patch
+  ./scripts/release.sh patch
 
 release-minor:
   just check
-	./scripts/release.sh minor
+  ./scripts/release.sh minor
 
 release-major:
   just check
-	./scripts/release.sh major
+  ./scripts/release.sh major
