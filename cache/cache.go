@@ -200,3 +200,12 @@ func (m *Memory) Close() error {
 	close(m.stopCh)
 	return nil
 }
+
+func (m *Memory) Closer() func() {
+	return func() {
+		err := m.Close()
+		if err != nil {
+			panic(err)
+		}
+	}
+}

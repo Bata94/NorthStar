@@ -5,7 +5,7 @@ list:
 	@just --list
 
 build:
-	go build -ldflags="-s -w -X main.Version=$$(cat VERSION 2>/dev/null || echo dev)" -o northstar .
+	go build -ldflags="-s -w -X main.Version=$(cat VERSION 2>/dev/null || echo dev)" -o northstar .
 
 run:
 	go run .

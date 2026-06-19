@@ -30,30 +30,20 @@ services:
     volumes:
       - .:/app
     env_file: .env
-    environment:
-      - TZ=Europe/Berlin
-      - NORTHSTAR_TZ=Europe/Berlin
-      - NORTHSTAR_MODE=dev
-      - NORTHSTAR_CACHE_ADDR=valkey:6379
-    depends_on:
-      - valkey
-    # deploy:
-    #   resources:
-    #     limits:
-    #       cpus: "2"
-    #       memory: 512M
+    # environment:
+    #   - TZ=Europe/Berlin
+    #   - NORTHSTAR_TZ=Europe/Berlin
+    #   - NORTHSTAR_MODE=dev
+    #   - NORTHSTAR_CACHE_ADDR=valkey:6379
+    # depends_on:
+    #   - valkey
 
-  valkey:
-    image: valkey/valkey:alpine
-    restart: unless-stopped
-    # deploy:
-    #   resources:
-    #     limits:
-    #       cpus: "2"
-    #       memory: 2G
-
-  redisinsight:
-    image: redis/redisinsight:latest
-    ports:
-      - "5540:5540"
-    restart: unless-stopped
+  # valkey:
+  #   image: valkey/valkey:alpine
+  #   restart: unless-stopped
+  #
+  # redisinsight:
+  #   image: redis/redisinsight:latest
+  #   ports:
+  #     - "5540:5540"
+  #   restart: unless-stopped

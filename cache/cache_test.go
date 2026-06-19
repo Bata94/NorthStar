@@ -158,7 +158,7 @@ func TestCopyRecordsFloorOneSecond(t *testing.T) {
 
 func TestMemoryGetSet(t *testing.T) {
 	m := NewMemory()
-	defer m.Close() //nolint:errcheck
+	defer m.Closer()()
 
 	ctx := context.Background()
 	e := NewEntry("example.com", 1,
@@ -179,7 +179,7 @@ func TestMemoryGetSet(t *testing.T) {
 
 func TestMemoryGetMiss(t *testing.T) {
 	m := NewMemory()
-	defer m.Close() //nolint:errcheck
+	defer m.Closer()()
 	_, ok := m.Get(context.Background(), "nonexistent", 1)
 	if ok {
 		t.Fatal("expected cache miss")
@@ -188,7 +188,7 @@ func TestMemoryGetMiss(t *testing.T) {
 
 func TestMemoryPeek(t *testing.T) {
 	m := NewMemory()
-	defer m.Close() //nolint:errcheck
+	defer m.Closer()()
 
 	ctx := context.Background()
 	e := NewEntry("example.com", 1,

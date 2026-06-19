@@ -33,6 +33,30 @@ var levelStyle = map[slog.Level]struct {
 	slog.LevelError: {"ERR", red},
 }
 
+var fallbackLevelStyle = struct {
+	Label string
+	Color string
+}{"UNK", ""}
+
+func levelStyleFor(level slog.Level) struct {
+	Label string
+	Color string
+} {
+	if cfg, ok := levelStyle[level]; ok {
+		return cfg
+	}
+	label := strings.ToUpper(level.String())
+	if label == "" {
+		label = fallbackLevelStyle.Label
+	} else if len(label) > 3 {
+		label = label[:3]
+	}
+	return struct {
+		Label string
+		Color string
+	}{Label: label, Color: fallbackLevelStyle.Color}
+}
+
 type consoleHandler struct {
 	level  slog.Leveler
 	attrs  []slog.Attr
@@ -50,7 +74,7 @@ func (h *consoleHandler) Handle(_ context.Context, r slog.Record) error {
 	b := make([]byte, 0, 256)
 	b = append(b, r.Time.Format("15:04:05")...)
 
-	cfg := levelStyle[r.Level]
+	cfg := levelStyleFor(r.Level)
 	if h.color {
 		b = append(b, "  \033[0m"...)
 		b = append(b, cfg.Color...)
@@ -219,7 +243,7 @@ func (w *rotateWriter) rotate(now time.Time) error {
 	w.today = now.Format("2006-01-02")
 
 	if w.maxAge > 0 {
-		go w.cleanup(now)
+		w.cleanup(now)
 	}
 
 	return nil

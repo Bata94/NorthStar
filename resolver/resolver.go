@@ -35,24 +35,15 @@ func Serve(ctx context.Context, l config.Listener, upstream string, c cache.Cach
 
 	slog.Info("UDP server listening", "addr", addr.String())
 
-	var wg sync.WaitGroup
 	buf := make([]byte, 1500)
-	for {
-		select {
-		case <-ctx.Done():
-			goto drain
-		default:
-		}
-
+	iteration := func(wg *sync.WaitGroup) error {
 		if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
-			panic(fmt.Sprintf("failed to set read deadline: %v", err))
+			slog.Error("Failed to set UDP read deadline", "error", err)
+			return nil
 		}
 
 		n, remoteAddr, err := conn.ReadFromUDP(buf)
 		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				continue
-			}
 			return err
 		}
 
@@ -63,21 +54,10 @@ func Serve(ctx context.Context, l config.Listener, upstream string, c cache.Cach
 			defer wg.Done()
 			handleRequest(ctx, data, remoteAddr, conn, upstream, c, rateLimit, staleAge, pool, m)
 		}()
+		return nil
 	}
 
-drain:
-	slog.Info("Draining in-flight requests...")
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		slog.Warn("Drain timeout, forcing shutdown")
-	}
-	return nil
+	return serveLoop(ctx, iteration, "Draining in-flight requests...", "Drain timeout, forcing shutdown")
 }
 
 func ServeTCP(ctx context.Context, l config.Listener, upstream string, c cache.Cache, rateLimit int, staleAge int, pool *Pool, m *metrics.Metrics) error {
@@ -94,23 +74,14 @@ func ServeTCP(ctx context.Context, l config.Listener, upstream string, c cache.C
 
 	slog.Info("TCP server listening", "addr", addr.String())
 
-	var wg sync.WaitGroup
-	for {
-		select {
-		case <-ctx.Done():
-			goto drain
-		default:
-		}
-
+	iteration := func(wg *sync.WaitGroup) error {
 		if err := listener.SetDeadline(time.Now().Add(time.Second)); err != nil {
-			panic(fmt.Sprintf("failed to set TCP accept deadline: %v", err))
+			slog.Error("Failed to set TCP accept deadline", "error", err)
+			return nil
 		}
 
 		tcpConn, err := listener.Accept()
 		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				continue
-			}
 			return err
 		}
 
@@ -119,10 +90,33 @@ func ServeTCP(ctx context.Context, l config.Listener, upstream string, c cache.C
 			defer wg.Done()
 			handleTCPConnection(ctx, tcpConn, upstream, c, rateLimit, staleAge, pool, m)
 		}()
+		return nil
+	}
+
+	return serveLoop(ctx, iteration, "Draining TCP connections...", "TCP drain timeout, forcing shutdown")
+}
+
+func serveLoop(ctx context.Context, iteration func(*sync.WaitGroup) error, drainMsg, timeoutMsg string) error {
+	var wg sync.WaitGroup
+	for {
+		select {
+		case <-ctx.Done():
+			goto drain
+		default:
+		}
+
+		if err := iteration(&wg); err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				continue
+			}
+			return err
+		}
 	}
 
 drain:
-	slog.Info("Draining TCP connections...")
+	if drainMsg != "" {
+		slog.Info(drainMsg)
+	}
 	done := make(chan struct{})
 	go func() {
 		wg.Wait()
@@ -131,7 +125,11 @@ drain:
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		slog.Warn("TCP drain timeout, forcing shutdown")
+		if timeoutMsg != "" {
+			slog.Warn(timeoutMsg)
+		} else {
+			slog.Warn("Drain timeout, forcing shutdown")
+		}
 	}
 	return nil
 }
@@ -225,84 +223,16 @@ func handleTCPConnection(ctx context.Context, conn net.Conn, upstream string, c 
 		return
 	}
 
-	q := req.Questions[0]
+	clientIP := conn.RemoteAddr().String()
+	if host, _, err := net.SplitHostPort(clientIP); err == nil {
+		clientIP = host
+	}
+
 	maxPayload, do := clientEDNS(&req)
-
-	m.QueriesTotal.With(prometheus.Labels{"qtype": strconv.Itoa(int(q.Type))}).Inc()
-
-	if rateLimit > 0 {
-		clientIP, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
-		key := fmt.Sprintf("northstar:ratelimit:%s:%d", clientIP, time.Now().Unix())
-		val, err := c.Incr(ctx, key, time.Second)
-		if err == nil && val > int64(rateLimit) {
-			slog.Warn("Rate limit exceeded", "client", clientIP, "qps", rateLimit)
-			m.ErrorsTotal.With(prometheus.Labels{"type": "rate_limited"}).Inc()
-			resp := dns.Message{
-				Header: dns.Header{
-					ID:      req.Header.ID,
-					Flags:   req.Header.Flags & ^uint16(0x002F) | 0x8000 | 0x0002,
-					QDCount: 1,
-				},
-				Questions: req.Questions,
-			}
-			if err := writeTCPResponse(conn, resp.Pack()); err != nil {
-				slog.Error("Error writing TCP SERVFAIL", "error", err)
-			}
-			return
-		}
+	send := func(resp []byte) error {
+		return writeTCPResponse(conn, resp)
 	}
-
-	entry, err := resolve(ctx, q.Name, q.Type, upstream, c, maxPayload, "tcp", staleAge, pool, do, m)
-	if err != nil {
-		slog.Warn("Upstream error", "domain", q.Name, "type", q.Type, "error", err)
-		m.ErrorsTotal.With(prometheus.Labels{"type": "servfail"}).Inc()
-		resp := dns.Message{
-			Header: dns.Header{
-				ID:      req.Header.ID,
-				Flags:   req.Header.Flags & ^uint16(0x002F) | 0x8000 | 0x0002,
-				QDCount: 1,
-			},
-			Questions: req.Questions,
-		}
-		if err := writeTCPResponse(conn, resp.Pack()); err != nil {
-			slog.Error("Error writing TCP SERVFAIL", "error", err)
-		}
-		return
-	}
-
-	answers, authorities, additionals := entry.CopyRecordsWithAdjustedTTL()
-
-	additionals = append(additionals, dns.ResourceRecord{
-		Name:  "",
-		Type:  41,
-		Class: maxPayload,
-	})
-
-	flags := req.Header.Flags & 0x7910
-	flags |= 0x8000 | 0x0080 | entry.RCode
-	if entry.AuthenticData {
-		flags |= 0x0020
-	}
-
-	resp := dns.Message{
-		Header: dns.Header{
-			ID:      req.Header.ID,
-			Flags:   flags,
-			QDCount: 1,
-			ANCount: uint16(len(answers)),
-			NSCount: uint16(len(authorities)),
-			ARCount: uint16(len(additionals)),
-		},
-		Questions:   req.Questions,
-		Answers:     answers,
-		Authorities: authorities,
-		Additionals: additionals,
-	}
-
-	if err := writeTCPResponse(conn, resp.Pack()); err != nil {
-		slog.Error("Error writing TCP response", "error", err)
-	}
-	slog.Debug("TCP query completed", "domain", q.Name, "type", q.Type, "answers", len(entry.Answers))
+	processQuery(ctx, &req, "tcp", clientIP, maxPayload, do, rateLimit, send, upstream, c, staleAge, pool, m)
 }
 
 func writeTCPResponse(conn net.Conn, data []byte) error {
@@ -318,63 +248,26 @@ func writeTCPResponse(conn net.Conn, data []byte) error {
 	return err
 }
 
-func handleRequest(ctx context.Context, data []byte, remoteAddr *net.UDPAddr, conn *net.UDPConn, upstream string, c cache.Cache, rateLimit int, staleAge int, pool *Pool, m *metrics.Metrics) {
-	m.ActiveHandlers.Inc()
-	defer m.ActiveHandlers.Dec()
-
-	var req dns.Message
-	if err := req.Parse(data); err != nil {
-		slog.Warn("Failed to parse request", "error", err)
-		m.ErrorsTotal.With(prometheus.Labels{"type": "parse_error"}).Inc()
-		return
-	}
-
-	if len(req.Questions) == 0 {
-		slog.Warn("Request has no questions")
-		return
-	}
-
+func processQuery(ctx context.Context, req *dns.Message, network, clientIP string, maxPayload uint16, do bool, rateLimit int, send func([]byte) error, upstream string, c cache.Cache, staleAge int, pool *Pool, m *metrics.Metrics) {
 	q := req.Questions[0]
-	maxPayload, do := clientEDNS(&req)
-
 	m.QueriesTotal.With(prometheus.Labels{"qtype": strconv.Itoa(int(q.Type))}).Inc()
 
 	if rateLimit > 0 {
-		key := fmt.Sprintf("northstar:ratelimit:%s:%d", remoteAddr.IP, time.Now().Unix())
+		key := rateLimitKey(clientIP)
 		val, err := c.Incr(ctx, key, time.Second)
 		if err == nil && val > int64(rateLimit) {
-			slog.Warn("Rate limit exceeded", "client", remoteAddr.IP, "qps", rateLimit)
+			slog.Warn("Rate limit exceeded", "client", clientIP, "qps", rateLimit)
 			m.ErrorsTotal.With(prometheus.Labels{"type": "rate_limited"}).Inc()
-			resp := dns.Message{
-				Header: dns.Header{
-					ID:      req.Header.ID,
-					Flags:   req.Header.Flags & ^uint16(0x002F) | 0x8000 | 0x0002,
-					QDCount: 1,
-				},
-				Questions: req.Questions,
-			}
-			if _, err := conn.WriteToUDP(resp.Pack(), remoteAddr); err != nil {
-				slog.Error("Error writing SERVFAIL", "error", err)
-			}
+			sendServfail(req, send)
 			return
 		}
 	}
 
-	entry, err := resolve(ctx, q.Name, q.Type, upstream, c, maxPayload, "udp", staleAge, pool, do, m)
+	entry, err := resolve(ctx, q.Name, q.Type, upstream, c, maxPayload, network, staleAge, pool, do, m)
 	if err != nil {
 		slog.Warn("Upstream error", "domain", q.Name, "type", q.Type, "error", err)
 		m.ErrorsTotal.With(prometheus.Labels{"type": "servfail"}).Inc()
-		resp := dns.Message{
-			Header: dns.Header{
-				ID:      req.Header.ID,
-				Flags:   req.Header.Flags & ^uint16(0x002F) | 0x8000 | 0x0002,
-				QDCount: 1,
-			},
-			Questions: req.Questions,
-		}
-		if _, err := conn.WriteToUDP(resp.Pack(), remoteAddr); err != nil {
-			slog.Error("Error writing SERVFAIL", "error", err)
-		}
+		sendServfail(req, send)
 		return
 	}
 
@@ -420,10 +313,55 @@ func handleRequest(ctx context.Context, data []byte, remoteAddr *net.UDPAddr, co
 		respPacked = resp.Pack()
 	}
 
-	if _, err := conn.WriteToUDP(respPacked, remoteAddr); err != nil {
+	if err := send(respPacked); err != nil {
 		slog.Error("Error writing response", "error", err)
+		return
 	}
 	slog.Debug("Query completed", "domain", q.Name, "type", q.Type, "answers", len(entry.Answers))
+}
+
+func sendServfail(req *dns.Message, send func([]byte) error) {
+	resp := dns.Message{
+		Header: dns.Header{
+			ID:      req.Header.ID,
+			Flags:   req.Header.Flags & ^uint16(0x002F) | 0x8000 | 0x0002,
+			QDCount: 1,
+		},
+		Questions: req.Questions,
+	}
+	packed := resp.Pack()
+	if err := send(packed); err != nil {
+		slog.Error("Error writing SERVFAIL", "error", err)
+	}
+}
+
+func rateLimitKey(clientIP string) string {
+	return fmt.Sprintf("northstar:ratelimit:%s:%d", clientIP, time.Now().Unix())
+}
+
+func handleRequest(ctx context.Context, data []byte, remoteAddr *net.UDPAddr, conn *net.UDPConn, upstream string, c cache.Cache, rateLimit int, staleAge int, pool *Pool, m *metrics.Metrics) {
+	m.ActiveHandlers.Inc()
+	defer m.ActiveHandlers.Dec()
+
+	var req dns.Message
+	if err := req.Parse(data); err != nil {
+		slog.Warn("Failed to parse request", "error", err)
+		m.ErrorsTotal.With(prometheus.Labels{"type": "parse_error"}).Inc()
+		return
+	}
+
+	if len(req.Questions) == 0 {
+		slog.Warn("Request has no questions")
+		return
+	}
+
+	clientIP := remoteAddr.IP.String()
+	maxPayload, do := clientEDNS(&req)
+	send := func(resp []byte) error {
+		_, err := conn.WriteToUDP(resp, remoteAddr)
+		return err
+	}
+	processQuery(ctx, &req, "udp", clientIP, maxPayload, do, rateLimit, send, upstream, c, staleAge, pool, m)
 }
 
 func fetchFromUpstream(ctx context.Context, domain string, qtype uint16, maxPayload uint16, network string, pool *Pool, do bool, m *metrics.Metrics) (*cache.Entry, error) {
@@ -564,15 +502,15 @@ func refreshCache(call *inflightCall, ikey inflightKey, domain string, qtype uin
 func resolve(ctx context.Context, domain string, qtype uint16, upstream string, c cache.Cache, maxPayload uint16, network string, staleAge int, pool *Pool, do bool, m *metrics.Metrics) (*cache.Entry, error) {
 	m.CacheLookups.Inc()
 
-	if entry, found := c.Peek(ctx, domain, qtype); found && !entry.Expired() {
-		slog.Debug("Cache hit", "domain", domain, "type", qtype)
-		m.CacheHits.Inc()
-		return entry, nil
-	}
-
-	if staleAge > 0 {
-		if stale, found := c.Peek(ctx, domain, qtype); found && stale.Expired() {
-			expiredFor := time.Since(stale.ExpiresAt)
+	entry, found := c.Peek(ctx, domain, qtype)
+	if found {
+		if !entry.Expired() {
+			slog.Debug("Cache hit", "domain", domain, "type", qtype)
+			m.CacheHits.Inc()
+			return entry, nil
+		}
+		if staleAge > 0 {
+			expiredFor := time.Since(entry.ExpiresAt)
 			if expiredFor < time.Duration(staleAge)*time.Second {
 				slog.Debug("Serving stale entry, refreshing in background", "domain", domain, "type", qtype)
 				ikey := inflightKey{domain, qtype}
@@ -585,7 +523,7 @@ func resolve(ctx context.Context, domain string, qtype uint16, upstream string, 
 				} else {
 					inflightMu.Unlock()
 				}
-				return stale, nil
+				return entry, nil
 			}
 		}
 	}

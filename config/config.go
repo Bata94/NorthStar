@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -61,41 +62,24 @@ func Load() Config {
 		TimeZone:     getEnv("NORTHSTAR_TZ", ""),
 	}
 
-	if getEnv("NORTHSTAR_DNS_IPV4_DISABLE", "") == "true" {
-		cfg.Ipv4Disable = true
-	}
-	if getEnv("NORTHSTAR_DNS_IPV6_DISABLE", "") == "true" {
-		cfg.Ipv6Disable = true
-	}
+	cfg.Ipv4Disable = getEnvBool("NORTHSTAR_DNS_IPV4_DISABLE")
+	cfg.Ipv6Disable = getEnvBool("NORTHSTAR_DNS_IPV6_DISABLE")
 
 	if cfg.Ipv4Disable && cfg.Ipv6Disable {
 		panic("No IP addresses provided. Please set either NORTHSTAR_DNS_IPV4_DISABLE or NORTHSTAR_DNS_IPV6_DISABLE to false")
 	}
 
-	if getEnv("NORTHSTAR_TCP_DISABLE", "") == "true" {
-		cfg.TcpDisable = true
-	}
+	cfg.TcpDisable = getEnvBool("NORTHSTAR_TCP_DISABLE")
 
 	cfg.RateLimit = getEnvInt("NORTHSTAR_DNS_RATE_LIMIT", 0)
 	cfg.StaleAge = getEnvInt("NORTHSTAR_DNS_STALE_AGE", 60)
 	cfg.UpstreamPoolSize = getEnvInt("NORTHSTAR_UPSTREAM_POOL_SIZE", 10)
 	cfg.UpstreamPoolIdle = getEnvInt("NORTHSTAR_UPSTREAM_POOL_IDLE", 30)
 
-	if getEnv("NORTHSTAR_METRICS_ENABLE", "") == "true" {
-		cfg.MetricsEnable = true
-	}
+	cfg.MetricsEnable = getEnvBool("NORTHSTAR_METRICS_ENABLE")
 	cfg.MetricsPort = getEnvInt("NORTHSTAR_METRICS_PORT", 9153)
 
-	if !cfg.Ipv4Disable && !cfg.Ipv6Disable {
-		cfg.Listeners = append(cfg.Listeners, Listener{IP: "::", Port: cfg.DNSPort})
-	} else {
-		if !cfg.Ipv4Disable {
-			cfg.Listeners = append(cfg.Listeners, Listener{IP: "0.0.0.0", Port: cfg.DNSPort})
-		}
-		if !cfg.Ipv6Disable {
-			cfg.Listeners = append(cfg.Listeners, Listener{IP: "::", Port: cfg.DNSPort})
-		}
-	}
+	cfg.Listeners = buildListeners(cfg.DNSPort, cfg.Ipv4Disable, cfg.Ipv6Disable)
 
 	return cfg
 }
@@ -114,4 +98,22 @@ func getEnvInt(key string, fallback int) int {
 		}
 	}
 	return fallback
+}
+
+func getEnvBool(key string) bool {
+	return strings.EqualFold(getEnv(key, ""), "true")
+}
+
+func buildListeners(port int, disableIPv4, disableIPv6 bool) []Listener {
+	if !disableIPv4 && !disableIPv6 {
+		return []Listener{{IP: "::", Port: port}}
+	}
+	var listeners []Listener
+	if !disableIPv4 {
+		listeners = append(listeners, Listener{IP: "0.0.0.0", Port: port})
+	}
+	if !disableIPv6 {
+		listeners = append(listeners, Listener{IP: "::", Port: port})
+	}
+	return listeners
 }
