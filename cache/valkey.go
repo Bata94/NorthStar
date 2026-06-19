@@ -46,7 +46,7 @@ func (v *Valkey) Get(ctx context.Context, domain string, qtype uint16) (*Entry, 
 	data, err := v.client.Do(ctx, v.client.B().Get().Key(key).Build()).AsBytes()
 	if err != nil {
 		if !valkey.IsValkeyNil(err) {
-			slog.Warn("Valkey get error", "error", err)
+			slog.Error("Valkey get error", "error", err)
 		}
 		return nil, false
 	}
@@ -69,7 +69,7 @@ func (v *Valkey) Get(ctx context.Context, domain string, qtype uint16) (*Entry, 
 
 	var msg dns.Message
 	if err := msg.Parse(wireData); err != nil {
-		slog.Warn("Valkey parse error", "error", err)
+		slog.Error("Valkey parse error", "error", err)
 		return nil, false
 	}
 

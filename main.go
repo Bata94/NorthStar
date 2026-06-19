@@ -46,13 +46,13 @@ func main() {
 		}
 	}
 	slog.SetDefault(log.New(logLevel, logMode, cfg.LogDir, cfg.LogRetention))
-	slog.Info("starting northstar", "version", Version)
+	slog.Warn("starting northstar", "version", Version)
 
 	var backend cache.Cache
 	if cfg.CacheAddr != "" {
 		b, err := cache.NewValkey(cfg.CacheAddr, cfg.StaleAge)
 		if err != nil {
-			slog.Warn("Valkey unreachable, using in-memory cache", "error", err)
+			slog.Error("Valkey unreachable, using in-memory cache", "error", err)
 			backend = cache.NewMemory()
 		} else {
 			slog.Info("Using Valkey cache", "addr", cfg.CacheAddr)
@@ -104,7 +104,7 @@ func main() {
 		}
 	}
 
-	slog.Info("Server listening", "listeners", cfg.Listeners, "tcp_disabled", cfg.TcpDisable, "metrics_enabled", cfg.MetricsEnable)
+	slog.Warn("Server listening", "listeners", cfg.Listeners, "tcp_disabled", cfg.TcpDisable, "metrics_enabled", cfg.MetricsEnable)
 
 	select {
 	case err := <-errChan:
@@ -112,11 +112,11 @@ func main() {
 			slog.Error("Fatal error", "error", err)
 		}
 		cancel()
-		slog.Info("Initiating shutdown after error...")
+		slog.Warn("Initiating shutdown after error...")
 		time.Sleep(time.Second)
 	case <-ctx.Done():
-		slog.Info("Shutting down...")
+		slog.Warn("Shutting down...")
 	}
 
-	slog.Info("Goodbye.")
+	slog.Warn("Goodbye.")
 }

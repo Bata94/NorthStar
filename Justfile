@@ -29,6 +29,10 @@ check:
   just test
   just build
 
+alias dc := run-docker
+run-docker:
+  docker compose down && docker compose up -d --build northstar && docker compose up -d && docker compose logs -f
+
 release-patch:
 	./scripts/release.sh patch
 

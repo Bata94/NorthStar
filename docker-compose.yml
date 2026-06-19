@@ -1,40 +1,38 @@
 services:
-  # northstar:
-  #   build: .
-  #   ports:
-  #     - "${NORTHSTAR_DNS_PORT:-8053}:${NORTHSTAR_DNS_PORT:-8053}/udp"
-  #   cap_add:
-  #     - NET_BIND_SERVICE
-  #   env_file: .env
-  #   environment:
-  #     - TZ=Europe/Berlin
-  #     - NORTHSTAR_MODE=${NORTHSTAR_MODE:-prod}
-  #     - NORTHSTAR_CACHE_ADDR=valkey:6379
-  #   depends_on:
-  #     - valkey
-  #   deploy:
-  #     resources:
-  #       limits:
-  #         cpus: "2"
-  #         memory: 2048M
+  northstar:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: prod
+    ports:
+      - "9053:53"
+      - "9053:53/udp"
+      - "9153:9153"
+    cap_add:
+      - NET_BIND_SERVICE
+    env_file: prod.env
+    # depends_on:
+    #   - valkey
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2048M
 
   northstar-dev:
     build:
       context: .
-      dockerfile: Dockerfile.dev
+      dockerfile: Dockerfile
+      target: dev
     ports:
-      - "${NORTHSTAR_DNS_PORT:-8053}:${NORTHSTAR_DNS_PORT:-8053}/udp"
-      - "${NORTHSTAR_METRICS_PORT:-9153}:${NORTHSTAR_METRICS_PORT:-9153}"
+      - "8053:53"
+      - "8053:53/udp"
+      - "8153:9153"
     cap_add:
       - NET_BIND_SERVICE
     volumes:
       - .:/app
-    env_file: .env
-    # environment:
-    #   - TZ=Europe/Berlin
-    #   - NORTHSTAR_TZ=Europe/Berlin
-    #   - NORTHSTAR_MODE=dev
-    #   - NORTHSTAR_CACHE_ADDR=valkey:6379
+    env_file: dev.env
     # depends_on:
     #   - valkey
 

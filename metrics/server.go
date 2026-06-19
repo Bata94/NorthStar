@@ -22,13 +22,13 @@ func Serve(ctx context.Context, addr string, m *Metrics) error {
 
 	go func() {
 		<-ctx.Done()
-		slog.Info("Shutting down metrics HTTP server...")
+		slog.Warn("Shutting down metrics HTTP server...")
 		if err := server.Shutdown(context.Background()); err != nil {
 			slog.Error("Metrics HTTP server shutdown error", "error", err)
 		}
 	}()
 
-	slog.Info("Metrics HTTP server listening", "addr", addr)
+	slog.Warn("Metrics HTTP server listening", "addr", addr)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("metrics http server: %w", err)
 	}

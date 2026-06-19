@@ -94,6 +94,13 @@ main.go
 - `multiHandler` — writes to both console (colored) and `northstar.log` (JSON)
 - `New(levelStr, mode)` — creates `slog.Logger`; level from config (`NORTHSTAR_LOG_LEVEL`), log-to-`northstar.log` file always tried
 
+### Log Level Conventions
+Default prod level is `warn`, so `Info` and `Debug` are invisible in prod unless explicitly configured.
+- **`Error`** — real service degradation: upstream failures, cache backend errors, drain timeouts, cache set failures, SERVFAIL returned to clients, background refresh failures, response truncation (partial data sent). Also syscall/IO failures that prevent operation (deadline, close, write errors).
+- **`Warn`** — lifecycle events operators should see in prod: server startup/shutdown, listener addresses, shutdown initiation after error, draining message. Also notable anomalies: rate limit exceeded, malformed client requests, Valkey operational errors.
+- **`Info`** — notable operational events visible only when `logLevel=info`: stale-while-revalidate cache behavior, response truncation events, cache backend choice.
+- **`Debug`** — high-frequency per-query tracing: cache hit/miss, query completion, inflight dedup waits. Only visible in dev mode.
+
 ### `resolver`
 - No globals except `inflightCalls` map (package-level, shared across listeners)
 - `Serve` (UDP) / `ServeTCP` — accept loops with 1s deadline for ctx polling, graceful drain (5s timeout)

@@ -33,7 +33,7 @@ func Serve(ctx context.Context, l config.Listener, upstream string, c cache.Cach
 		}
 	}()
 
-	slog.Info("UDP server listening", "addr", addr.String())
+	slog.Warn("UDP server listening", "addr", addr.String())
 
 	buf := make([]byte, 1500)
 	iteration := func(wg *sync.WaitGroup) error {
@@ -72,7 +72,7 @@ func ServeTCP(ctx context.Context, l config.Listener, upstream string, c cache.C
 		}
 	}()
 
-	slog.Info("TCP server listening", "addr", addr.String())
+	slog.Warn("TCP server listening", "addr", addr.String())
 
 	iteration := func(wg *sync.WaitGroup) error {
 		if err := listener.SetDeadline(time.Now().Add(time.Second)); err != nil {
@@ -115,7 +115,7 @@ func serveLoop(ctx context.Context, iteration func(*sync.WaitGroup) error, drain
 
 drain:
 	if drainMsg != "" {
-		slog.Info(drainMsg)
+		slog.Warn(drainMsg)
 	}
 	done := make(chan struct{})
 	go func() {
@@ -126,9 +126,9 @@ drain:
 	case <-done:
 	case <-time.After(5 * time.Second):
 		if timeoutMsg != "" {
-			slog.Warn(timeoutMsg)
+			slog.Error(timeoutMsg)
 		} else {
-			slog.Warn("Drain timeout, forcing shutdown")
+			slog.Error("Drain timeout, forcing shutdown")
 		}
 	}
 	return nil
@@ -265,7 +265,7 @@ func processQuery(ctx context.Context, req *dns.Message, network, clientIP strin
 
 	entry, err := resolve(ctx, q.Name, q.Type, upstream, c, maxPayload, network, staleAge, pool, do, m)
 	if err != nil {
-		slog.Warn("Upstream error", "domain", q.Name, "type", q.Type, "error", err)
+		slog.Error("Upstream error", "domain", q.Name, "type", q.Type, "error", err)
 		m.ErrorsTotal.With(prometheus.Labels{"type": "servfail"}).Inc()
 		sendServfail(req, send)
 		return
@@ -302,7 +302,7 @@ func processQuery(ctx context.Context, req *dns.Message, network, clientIP strin
 
 	respPacked := resp.Pack()
 	if len(respPacked) > int(maxPayload) {
-		slog.Debug("Response truncated", "domain", q.Name, "size", len(respPacked), "max", maxPayload)
+		slog.Info("Response truncated", "domain", q.Name, "size", len(respPacked), "max", maxPayload)
 		resp.Header.Flags |= 0x0200
 		resp.Answers = nil
 		resp.Authorities = nil
@@ -486,11 +486,11 @@ func refreshCache(call *inflightCall, ikey inflightKey, domain string, qtype uin
 	entry, err := fetchFromUpstream(ctx, domain, qtype, maxPayload, network, pool, do, m)
 	if err == nil {
 		if err := c.Set(ctx, entry); err != nil {
-			slog.Warn("Background refresh cache set failed", "domain", domain, "type", qtype, "error", err)
+			slog.Error("Background refresh cache set failed", "domain", domain, "type", qtype, "error", err)
 		}
 		call.entry = entry
 	} else {
-		slog.Warn("Background refresh failed", "domain", domain, "type", qtype, "error", err)
+		slog.Error("Background refresh failed", "domain", domain, "type", qtype, "error", err)
 		call.err = err
 	}
 	call.once.Do(func() { close(call.done) })
@@ -512,7 +512,7 @@ func resolve(ctx context.Context, domain string, qtype uint16, upstream string, 
 		if staleAge > 0 {
 			expiredFor := time.Since(entry.ExpiresAt)
 			if expiredFor < time.Duration(staleAge)*time.Second {
-				slog.Debug("Serving stale entry, refreshing in background", "domain", domain, "type", qtype)
+				slog.Info("Serving stale entry, refreshing in background", "domain", domain, "type", qtype)
 				ikey := inflightKey{domain, qtype}
 				inflightMu.Lock()
 				if _, exists := inflightCalls[ikey]; !exists {
@@ -562,7 +562,7 @@ func resolve(ctx context.Context, domain string, qtype uint16, upstream string, 
 		return nil, err
 	}
 	if err := c.Set(ctx, entry); err != nil {
-		slog.Warn("Cache set failed", "domain", domain, "type", qtype, "error", err)
+		slog.Error("Cache set failed", "domain", domain, "type", qtype, "error", err)
 	}
 	call.entry = entry
 	return entry, nil
