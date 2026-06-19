@@ -61,11 +61,7 @@ func main() {
 	} else {
 		backend = cache.NewMemory()
 	}
-	defer func() {
-		if err := backend.Close(); err != nil {
-			slog.Error("Error closing cache backend", "error", err)
-		}
-	}()
+	defer backend.Close()
 
 	m := metrics.New()
 

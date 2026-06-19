@@ -35,7 +35,7 @@ type Cache interface {
 	Peek(ctx context.Context, domain string, qtype uint16) (*Entry, bool)
 	Set(ctx context.Context, entry *Entry) error
 	Incr(ctx context.Context, key string, ttl time.Duration) (int64, error)
-	Close() error
+	Close()
 }
 
 func NewEntry(domain string, qtype uint16, answers, authorities, additionals []dns.ResourceRecord) *Entry {
@@ -196,16 +196,6 @@ func (m *Memory) Incr(_ context.Context, key string, ttl time.Duration) (int64, 
 	return ce.value, nil
 }
 
-func (m *Memory) Close() error {
+func (m *Memory) Close() {
 	close(m.stopCh)
-	return nil
-}
-
-func (m *Memory) Closer() func() {
-	return func() {
-		err := m.Close()
-		if err != nil {
-			panic(err)
-		}
-	}
 }

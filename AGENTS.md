@@ -138,8 +138,8 @@ main.go
 
 ## Tests
 - 6 test files: `cache/`, `config/`, `dns/`, `log/`, `metrics/`, `resolver/`
-- Run: `go test ./...`
-- Lint: `golangci-lint run`
+- Run: `just test`
+- Lint: `just lint`
 
 After big changes and before commits, run `just check` to run all tests and linters.
 
@@ -156,16 +156,19 @@ docker compose up northstar
 ```shell
 docker compose up northstar-dev
 ```
+### Lint
+```shell
+just lint
+```
 
 ## New Features
 
 After big changes and before commits, run `just check` to run all tests and linters.
 Add new features to `README.md`.
 
-### Lint
-```shell
-golangci-lint run
-```
+### Git
+
+For commits use commly used conventions and prefix commit messages with `feat:`, `fix:`, `docs:`, `style:`, `refactor:`, `test:`, or `chore:`.
 
 ## Build
 - `Dockerfile` — multi-stage, `gcr.io/distroless/static-debian12:nonroot`, ~5 MB, non-root (uid 65532)

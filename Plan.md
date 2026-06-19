@@ -37,6 +37,7 @@
 - Split-horizon DNS
 
 ## Observability
+- Revisit metrics pkg, add more and more detailed metrics
 - OpenTelemetry tracing
 - Tailored Grafana dashboard
 - Rotatable query log (who asked for what, latency, cache decision)

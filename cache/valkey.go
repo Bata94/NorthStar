@@ -139,9 +139,8 @@ func (v *Valkey) Incr(ctx context.Context, key string, ttl time.Duration) (int64
 	return val, nil
 }
 
-func (v *Valkey) Close() error {
+func (v *Valkey) Close() {
 	v.client.Close()
-	return nil
 }
 
 func (v *Valkey) key(domain string, qtype uint16) string {
