@@ -40,10 +40,40 @@ type FileQMinimizerHookConfig struct {
 	KeepLabels *int  `yaml:"keep_labels"`
 }
 
+type FileAnyQueryHookConfig struct {
+	Enabled  *bool   `yaml:"enabled"`
+	Priority *int    `yaml:"priority"`
+	Action   *string `yaml:"action"`
+}
+
+type FileDns64HookConfig struct {
+	Enabled  *bool   `yaml:"enabled"`
+	Priority *int    `yaml:"priority"`
+	Prefix   *string `yaml:"prefix"`
+}
+
+type FileEcsHookConfig struct {
+	Enabled  *bool `yaml:"enabled"`
+	Priority *int  `yaml:"priority"`
+	PrefixV4 *int  `yaml:"prefix_v4"`
+	PrefixV6 *int  `yaml:"prefix_v6"`
+}
+
+type FileDnssecHookConfig struct {
+	Enabled     *bool   `yaml:"enabled"`
+	Priority    *int    `yaml:"priority"`
+	Validation  *string `yaml:"validation"`
+	TrustAnchor *string `yaml:"trust_anchor"`
+}
+
 type FileHookConfig struct {
 	RateLimiting FileRateLimitHookConfig   `yaml:"rate_limiting"`
 	Blocking     *FileBlockingHookConfig   `yaml:"blocking"`
 	QMinimizer   *FileQMinimizerHookConfig `yaml:"qminimizer"`
+	AnyQuery     *FileAnyQueryHookConfig   `yaml:"any_query"`
+	Dns64        *FileDns64HookConfig      `yaml:"dns64"`
+	ECS          *FileEcsHookConfig        `yaml:"ecs"`
+	Dnssec       *FileDnssecHookConfig     `yaml:"dnssec"`
 }
 
 type FileRateLimitHookConfig struct {
@@ -111,6 +141,9 @@ type FileConfig struct {
 	DoHPort              *int                         `yaml:"doh_port"`
 	DoQEnabled           *bool                        `yaml:"doq_enabled"`
 	DoQPort              *int                         `yaml:"doq_port"`
+	Dns64Prefix          *string                      `yaml:"dns64_prefix"`
+	EcsPrefixV4          *int                         `yaml:"ecs_prefix_v4"`
+	EcsPrefixV6          *int                         `yaml:"ecs_prefix_v6"`
 	TLS                  *FileTLSConfig               `yaml:"tls"`
 	Hooks                *FileHookConfig              `yaml:"hooks"`
 }
@@ -308,6 +341,15 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 			cfg.TLS.AutoSelfSigned = *fc.TLS.AutoSelfSigned
 		}
 	}
+	if fc.Dns64Prefix != nil {
+		cfg.Dns64Prefix = *fc.Dns64Prefix
+	}
+	if fc.EcsPrefixV4 != nil {
+		cfg.EcsPrefixV4 = *fc.EcsPrefixV4
+	}
+	if fc.EcsPrefixV6 != nil {
+		cfg.EcsPrefixV6 = *fc.EcsPrefixV6
+	}
 	if fc.Hooks != nil {
 		if fc.Hooks.RateLimiting.Enabled != nil {
 			cfg.Hooks.RateLimiting.Enabled = *fc.Hooks.RateLimiting.Enabled
@@ -366,6 +408,57 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 				}
 			}
 		}
+		if fc.Hooks.AnyQuery != nil {
+			if fc.Hooks.AnyQuery.Enabled != nil {
+				cfg.Hooks.AnyQuery.Enabled = *fc.Hooks.AnyQuery.Enabled
+			}
+			if fc.Hooks.AnyQuery.Priority != nil {
+				cfg.Hooks.AnyQuery.Priority = *fc.Hooks.AnyQuery.Priority
+			}
+			if fc.Hooks.AnyQuery.Action != nil {
+				cfg.Hooks.AnyQuery.Action = *fc.Hooks.AnyQuery.Action
+			}
+		}
+		if fc.Hooks.Dns64 != nil {
+			if fc.Hooks.Dns64.Enabled != nil {
+				cfg.Hooks.Dns64.Enabled = *fc.Hooks.Dns64.Enabled
+			}
+			if fc.Hooks.Dns64.Priority != nil {
+				cfg.Hooks.Dns64.Priority = *fc.Hooks.Dns64.Priority
+			}
+			if fc.Hooks.Dns64.Prefix != nil {
+				cfg.Hooks.Dns64.Prefix = *fc.Hooks.Dns64.Prefix
+				cfg.Dns64Prefix = *fc.Hooks.Dns64.Prefix
+			}
+		}
+		if fc.Hooks.ECS != nil {
+			if fc.Hooks.ECS.Enabled != nil {
+				cfg.Hooks.ECS.Enabled = *fc.Hooks.ECS.Enabled
+			}
+			if fc.Hooks.ECS.Priority != nil {
+				cfg.Hooks.ECS.Priority = *fc.Hooks.ECS.Priority
+			}
+			if fc.Hooks.ECS.PrefixV4 != nil {
+				cfg.Hooks.ECS.PrefixV4 = *fc.Hooks.ECS.PrefixV4
+			}
+			if fc.Hooks.ECS.PrefixV6 != nil {
+				cfg.Hooks.ECS.PrefixV6 = *fc.Hooks.ECS.PrefixV6
+			}
+		}
+		if fc.Hooks.Dnssec != nil {
+			if fc.Hooks.Dnssec.Enabled != nil {
+				cfg.Hooks.Dnssec.Enabled = *fc.Hooks.Dnssec.Enabled
+			}
+			if fc.Hooks.Dnssec.Priority != nil {
+				cfg.Hooks.Dnssec.Priority = *fc.Hooks.Dnssec.Priority
+			}
+			if fc.Hooks.Dnssec.Validation != nil {
+				cfg.Hooks.Dnssec.Validation = *fc.Hooks.Dnssec.Validation
+			}
+			if fc.Hooks.Dnssec.TrustAnchor != nil {
+				cfg.Hooks.Dnssec.TrustAnchor = *fc.Hooks.Dnssec.TrustAnchor
+			}
+		}
 	}
 }
 
@@ -403,6 +496,9 @@ func configToFile(cfg *Config) *FileConfig {
 	dohPort := cfg.DoHPort
 	doqEnabled := cfg.DoQEnabled
 	doqPort := cfg.DoQPort
+	dns64Prefix := cfg.Dns64Prefix
+	ecsPrefixV4 := cfg.EcsPrefixV4
+	ecsPrefixV6 := cfg.EcsPrefixV6
 	hookEnabled := cfg.Hooks.RateLimiting.Enabled
 	hookPriority := cfg.Hooks.RateLimiting.Priority
 	hookRate := cfg.Hooks.RateLimiting.Rate
@@ -419,6 +515,24 @@ func configToFile(cfg *Config) *FileConfig {
 	qminEnabled := cfg.Hooks.QMinimizer.Enabled
 	qminPriority := cfg.Hooks.QMinimizer.Priority
 	qminKeepLabels := cfg.Hooks.QMinimizer.KeepLabels
+
+	anyQueryEnabled := cfg.Hooks.AnyQuery.Enabled
+	anyQueryPriority := cfg.Hooks.AnyQuery.Priority
+	anyQueryAction := cfg.Hooks.AnyQuery.Action
+
+	dns64HookEnabled := cfg.Hooks.Dns64.Enabled
+	dns64HookPriority := cfg.Hooks.Dns64.Priority
+	dns64HookPrefix := cfg.Hooks.Dns64.Prefix
+
+	ecsHookEnabled := cfg.Hooks.ECS.Enabled
+	ecsHookPriority := cfg.Hooks.ECS.Priority
+	ecsHookPrefixV4 := cfg.Hooks.ECS.PrefixV4
+	ecsHookPrefixV6 := cfg.Hooks.ECS.PrefixV6
+
+	dnssecEnabled := cfg.Hooks.Dnssec.Enabled
+	dnssecPriority := cfg.Hooks.Dnssec.Priority
+	dnssecValidation := cfg.Hooks.Dnssec.Validation
+	dnssecTrustAnchor := cfg.Hooks.Dnssec.TrustAnchor
 
 	var fileUpstreams []FileUpstreamConfig
 	for _, u := range cfg.Upstreams {
@@ -510,6 +624,9 @@ func configToFile(cfg *Config) *FileConfig {
 		MaxTCPConnsPerClient: &maxTCPConnsPerClient,
 		MetricsEnable:        &metricsEnable,
 		MetricsPort:          &metricsPort,
+		Dns64Prefix:          &dns64Prefix,
+		EcsPrefixV4:          &ecsPrefixV4,
+		EcsPrefixV6:          &ecsPrefixV6,
 		Hooks: &FileHookConfig{
 			RateLimiting: FileRateLimitHookConfig{
 				Enabled:  &hookEnabled,
@@ -531,6 +648,28 @@ func configToFile(cfg *Config) *FileConfig {
 				Enabled:    &qminEnabled,
 				Priority:   &qminPriority,
 				KeepLabels: &qminKeepLabels,
+			},
+			AnyQuery: &FileAnyQueryHookConfig{
+				Enabled:  &anyQueryEnabled,
+				Priority: &anyQueryPriority,
+				Action:   &anyQueryAction,
+			},
+			Dns64: &FileDns64HookConfig{
+				Enabled:  &dns64HookEnabled,
+				Priority: &dns64HookPriority,
+				Prefix:   &dns64HookPrefix,
+			},
+			ECS: &FileEcsHookConfig{
+				Enabled:  &ecsHookEnabled,
+				Priority: &ecsHookPriority,
+				PrefixV4: &ecsHookPrefixV4,
+				PrefixV6: &ecsHookPrefixV6,
+			},
+			Dnssec: &FileDnssecHookConfig{
+				Enabled:     &dnssecEnabled,
+				Priority:    &dnssecPriority,
+				Validation:  &dnssecValidation,
+				TrustAnchor: &dnssecTrustAnchor,
 			},
 		},
 	}
@@ -600,6 +739,9 @@ func WriteDefaultConfig(path string) error {
 	dohPort := 443
 	doqEnabled := true
 	doqPort := 853
+	dns64Prefix := "64:ff9b::/96"
+	ecsPrefixV4 := 24
+	ecsPrefixV6 := 56
 	hookEnabled := false
 	hookPriority := 100
 	hookRate := 0
@@ -612,6 +754,20 @@ func WriteDefaultConfig(path string) error {
 	qminEnabled := false
 	qminPriority := 300
 	qminKeepLabels := 2
+	anyQueryEnabled := false
+	anyQueryPriority := 400
+	anyQueryAction := "minimal"
+	dns64HookEnabled := false
+	dns64HookPriority := 500
+	dns64HookPrefix := "64:ff9b::/96"
+	ecsHookEnabled := false
+	ecsHookPriority := 600
+	ecsHookPrefixV4 := 24
+	ecsHookPrefixV6 := 56
+	dnssecEnabled := false
+	dnssecPriority := 700
+	dnssecValidation := "opportunistic"
+	dnssecTrustAnchor := ""
 
 	name := "default"
 	addr := "8.8.8.8:53"
@@ -654,6 +810,9 @@ func WriteDefaultConfig(path string) error {
 		DoHPort:             &dohPort,
 		DoQEnabled:          &doqEnabled,
 		DoQPort:             &doqPort,
+		Dns64Prefix:         &dns64Prefix,
+		EcsPrefixV4:         &ecsPrefixV4,
+		EcsPrefixV6:         &ecsPrefixV6,
 		TLS: &FileTLSConfig{
 			CertFile:       &certFile,
 			KeyFile:        &keyFile,
@@ -696,6 +855,28 @@ func WriteDefaultConfig(path string) error {
 				Enabled:    &qminEnabled,
 				Priority:   &qminPriority,
 				KeepLabels: &qminKeepLabels,
+			},
+			AnyQuery: &FileAnyQueryHookConfig{
+				Enabled:  &anyQueryEnabled,
+				Priority: &anyQueryPriority,
+				Action:   &anyQueryAction,
+			},
+			Dns64: &FileDns64HookConfig{
+				Enabled:  &dns64HookEnabled,
+				Priority: &dns64HookPriority,
+				Prefix:   &dns64HookPrefix,
+			},
+			ECS: &FileEcsHookConfig{
+				Enabled:  &ecsHookEnabled,
+				Priority: &ecsHookPriority,
+				PrefixV4: &ecsHookPrefixV4,
+				PrefixV6: &ecsHookPrefixV6,
+			},
+			Dnssec: &FileDnssecHookConfig{
+				Enabled:     &dnssecEnabled,
+				Priority:    &dnssecPriority,
+				Validation:  &dnssecValidation,
+				TrustAnchor: &dnssecTrustAnchor,
 			},
 		},
 	}

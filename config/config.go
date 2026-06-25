@@ -44,6 +44,10 @@ type HookConfig struct {
 	RateLimiting RateLimitHookConfig
 	Blocking     BlockingHookConfig
 	QMinimizer   QMinimizerHookConfig
+	AnyQuery     AnyQueryHookConfig
+	Dns64        Dns64HookConfig
+	ECS          EcsHookConfig
+	Dnssec       DnssecHookConfig
 }
 
 type UpstreamConfig struct {
@@ -73,6 +77,32 @@ type QMinimizerHookConfig struct {
 	Enabled    bool
 	Priority   int
 	KeepLabels int
+}
+
+type AnyQueryHookConfig struct {
+	Enabled  bool
+	Priority int
+	Action   string // "minimal" or "forward"
+}
+
+type Dns64HookConfig struct {
+	Enabled  bool
+	Priority int
+	Prefix   string // NAT64 prefix, default "64:ff9b::/96"
+}
+
+type EcsHookConfig struct {
+	Enabled  bool
+	Priority int
+	PrefixV4 int // source prefix length for IPv4 (default 24)
+	PrefixV6 int // source prefix length for IPv6 (default 56)
+}
+
+type DnssecHookConfig struct {
+	Enabled     bool
+	Priority    int
+	Validation  string // "required" or "opportunistic"
+	TrustAnchor string // path to root trust anchor file
 }
 
 type TLSConfig struct {
@@ -121,6 +151,9 @@ type Config struct {
 	MetricsEnable        bool
 	MetricsPort          int
 	ConfigPath           string
+	Dns64Prefix          string // NAT64 prefix, default "64:ff9b::/96"
+	EcsPrefixV4          int    // source prefix length for IPv4 (default 24)
+	EcsPrefixV6          int    // source prefix length for IPv6 (default 56)
 	Hooks                HookConfig
 }
 
@@ -169,6 +202,9 @@ func Load() Config {
 		MaxTCPConnsPerClient: 0,
 		MetricsEnable:        false,
 		MetricsPort:          9153,
+		Dns64Prefix:          "64:ff9b::/96",
+		EcsPrefixV4:          24,
+		EcsPrefixV6:          56,
 		Hooks: HookConfig{
 			RateLimiting: RateLimitHookConfig{
 				Enabled:  false,
@@ -187,6 +223,28 @@ func Load() Config {
 				Enabled:    false,
 				Priority:   300,
 				KeepLabels: 2,
+			},
+			AnyQuery: AnyQueryHookConfig{
+				Enabled:  false,
+				Priority: 400,
+				Action:   "minimal",
+			},
+			Dns64: Dns64HookConfig{
+				Enabled:  false,
+				Priority: 500,
+				Prefix:   "64:ff9b::/96",
+			},
+			ECS: EcsHookConfig{
+				Enabled:  false,
+				Priority: 600,
+				PrefixV4: 24,
+				PrefixV6: 56,
+			},
+			Dnssec: DnssecHookConfig{
+				Enabled:     false,
+				Priority:    700,
+				Validation:  "opportunistic",
+				TrustAnchor: "",
 			},
 		},
 	}
@@ -257,6 +315,9 @@ func Reload() (Config, error) {
 		MaxTCPConnsPerClient: 0,
 		MetricsEnable:        false,
 		MetricsPort:          9153,
+		Dns64Prefix:          "64:ff9b::/96",
+		EcsPrefixV4:          24,
+		EcsPrefixV6:          56,
 		Hooks: HookConfig{
 			RateLimiting: RateLimitHookConfig{
 				Enabled:  false,
@@ -275,6 +336,28 @@ func Reload() (Config, error) {
 				Enabled:    false,
 				Priority:   300,
 				KeepLabels: 2,
+			},
+			AnyQuery: AnyQueryHookConfig{
+				Enabled:  false,
+				Priority: 400,
+				Action:   "minimal",
+			},
+			Dns64: Dns64HookConfig{
+				Enabled:  false,
+				Priority: 500,
+				Prefix:   "64:ff9b::/96",
+			},
+			ECS: EcsHookConfig{
+				Enabled:  false,
+				Priority: 600,
+				PrefixV4: 24,
+				PrefixV6: 56,
+			},
+			Dnssec: DnssecHookConfig{
+				Enabled:     false,
+				Priority:    700,
+				Validation:  "opportunistic",
+				TrustAnchor: "",
 			},
 		},
 	}
@@ -423,6 +506,15 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v, ok := os.LookupEnv("NORTHSTAR_DOQ_PORT"); ok {
 		cfg.DoQPort = atoiOrZero(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_DNS64_PREFIX"); ok {
+		cfg.Dns64Prefix = v
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_ECS_PREFIX_V4"); ok {
+		cfg.EcsPrefixV4 = atoiOrZero(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_ECS_PREFIX_V6"); ok {
+		cfg.EcsPrefixV6 = atoiOrZero(v)
 	}
 	// ConfigPath override (not from file, directly via env)
 	if v, ok := os.LookupEnv("NORTHSTAR_CONFIG"); ok {

@@ -305,5 +305,44 @@ func buildHooks(cfg *config.Config, c cache.Cache, m *metrics.Metrics) []hooks.H
 		slog.Info("QNAME minimization enabled", "keep_labels", qminCfg.KeepLabels)
 	}
 
+	anyQueryCfg := cfg.Hooks.AnyQuery
+	result = append(result, hooks.NewAnyQueryHook(
+		anyQueryCfg.Enabled,
+		anyQueryCfg.Priority,
+		anyQueryCfg.Action,
+	))
+
+	dns64Cfg := cfg.Hooks.Dns64
+	if dns64Cfg.Enabled && dns64Cfg.Prefix != "" {
+		result = append(result, hooks.NewDns64Hook(
+			dns64Cfg.Enabled,
+			dns64Cfg.Priority,
+			dns64Cfg.Prefix,
+		))
+		slog.Info("DNS64 enabled", "prefix", dns64Cfg.Prefix)
+	}
+
+	ecsCfg := cfg.Hooks.ECS
+	if ecsCfg.Enabled {
+		result = append(result, hooks.NewEcsHook(
+			ecsCfg.Enabled,
+			ecsCfg.Priority,
+			ecsCfg.PrefixV4,
+			ecsCfg.PrefixV6,
+		))
+		slog.Info("ECS enabled", "prefix_v4", ecsCfg.PrefixV4, "prefix_v6", ecsCfg.PrefixV6)
+	}
+
+	dnssecCfg := cfg.Hooks.Dnssec
+	if dnssecCfg.Enabled {
+		result = append(result, hooks.NewDnssecHook(
+			dnssecCfg.Enabled,
+			dnssecCfg.Priority,
+			dnssecCfg.Validation,
+			dnssecCfg.TrustAnchor,
+		))
+		slog.Info("DNSSEC validation enabled", "mode", dnssecCfg.Validation)
+	}
+
 	return result
 }

@@ -24,6 +24,9 @@ type Metrics struct {
 	UpstreamConcurrentWins  *prometheus.CounterVec
 	UpstreamConditionalHits *prometheus.CounterVec
 	BlockedTotal            *prometheus.CounterVec
+	DnssecValidationStatus  *prometheus.CounterVec
+	Dns64SynthesesTotal     prometheus.Counter
+	EcsQueriesTotal         *prometheus.CounterVec
 	Registry                *prometheus.Registry
 }
 
@@ -136,6 +139,30 @@ func New() *Metrics {
 		Help:      "Total queries blocked by action and qtype.",
 	}, []string{"action", "qtype"})
 	reg.MustRegister(m.BlockedTotal)
+
+	m.DnssecValidationStatus = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "northstar",
+		Subsystem: "dnssec",
+		Name:      "validation_status_total",
+		Help:      "DNSSEC validation results by status (success, failure, skipped).",
+	}, []string{"status"})
+	reg.MustRegister(m.DnssecValidationStatus)
+
+	m.Dns64SynthesesTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "northstar",
+		Subsystem: "dns64",
+		Name:      "syntheses_total",
+		Help:      "Total AAAA records synthesized from A records.",
+	})
+	reg.MustRegister(m.Dns64SynthesesTotal)
+
+	m.EcsQueriesTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "northstar",
+		Subsystem: "ecs",
+		Name:      "queries_total",
+		Help:      "Total queries with ECS option injected, by address family.",
+	}, []string{"family"})
+	reg.MustRegister(m.EcsQueriesTotal)
 
 	return m
 }

@@ -196,7 +196,7 @@ func SetPipeline(p *hooks.Pipeline) {
 
 func clientEDNS(req *dns.Message) (size uint16, do bool) {
 	for _, rr := range req.Additionals {
-		if rr.Type == 41 {
+		if rr.Type == dns.TypeOPT {
 			return rr.Class, rr.TTL&0x00008000 != 0
 		}
 	}
@@ -206,7 +206,7 @@ func clientEDNS(req *dns.Message) (size uint16, do bool) {
 func stripOPT(rrs []dns.ResourceRecord) []dns.ResourceRecord {
 	var out []dns.ResourceRecord
 	for _, rr := range rrs {
-		if rr.Type != 41 {
+		if rr.Type != dns.TypeOPT {
 			out = append(out, rr)
 		}
 	}
@@ -315,7 +315,7 @@ func processQuery(ctx context.Context, req *dns.Message, network, clientIP strin
 		return
 	}
 
-	entry, upstreamName, err := resolve(ctx, q.Name, q.Type, group, c, maxPayload, network, runtimeCfg, do, m)
+	entry, upstreamName, err := resolve(ctx, q.Name, q.Type, group, c, maxPayload, network, runtimeCfg, do, m, hookCtx.ECSData)
 	if err != nil {
 		slog.Error("Upstream error", "domain", q.Name, "type", q.Type, "error", err)
 		m.ErrorsTotal.With(prometheus.Labels{"type": "servfail"}).Inc()
@@ -331,10 +331,15 @@ func processQuery(ctx context.Context, req *dns.Message, network, clientIP strin
 
 	answers, authorities, additionals := entry.CopyRecordsWithAdjustedTTL()
 
+	optTTLResp := uint32(0)
+	if do {
+		optTTLResp |= 0x00008000
+	}
 	additionals = append(additionals, dns.ResourceRecord{
 		Name:  "",
-		Type:  41,
+		Type:  dns.TypeOPT,
 		Class: maxPayload,
+		TTL:   optTTLResp,
 	})
 
 	flags := req.Header.Flags & 0x7910
@@ -427,7 +432,7 @@ func handleRequest(ctx context.Context, data []byte, remoteAddr *net.UDPAddr, co
 	processQuery(ctx, &req, "udp", clientIP, maxPayload, do, send, group, c, runtimeCfg, m)
 }
 
-func fetchFromUpstream(ctx context.Context, domain string, qtype uint16, maxPayload uint16, network string, u *upstream.Upstream, do bool, m *metrics.Metrics, ttlMin, ttlMax, negativeTTL int) (*cache.Entry, error) {
+func fetchFromUpstream(ctx context.Context, domain string, qtype uint16, maxPayload uint16, network string, u *upstream.Upstream, do bool, m *metrics.Metrics, ttlMin, ttlMax, negativeTTL int, ecsData []byte) (*cache.Entry, error) {
 	start := time.Now()
 	defer func() {
 		m.UpstreamLatency.WithLabelValues(u.Name).Observe(time.Since(start).Seconds())
@@ -438,6 +443,8 @@ func fetchFromUpstream(ctx context.Context, domain string, qtype uint16, maxPayl
 	if do {
 		optTTL |= 0x00008000
 	}
+	optRdata := append([]byte(nil), ecsData...)
+
 	msg := dns.Message{
 		Header: dns.Header{
 			ID:      queryID,
@@ -451,10 +458,12 @@ func fetchFromUpstream(ctx context.Context, domain string, qtype uint16, maxPayl
 			Class: 1,
 		}},
 		Additionals: []dns.ResourceRecord{{
-			Name:  "",
-			Type:  41,
-			Class: maxPayload,
-			TTL:   optTTL,
+			Name:     "",
+			Type:     dns.TypeOPT,
+			Class:    maxPayload,
+			TTL:      optTTL,
+			RDLength: uint16(len(optRdata)),
+			RData:    optRdata,
 		}},
 	}
 	query := msg.Pack()
@@ -591,7 +600,7 @@ func fetchFromUpstream(ctx context.Context, domain string, qtype uint16, maxPayl
 	return entry, nil
 }
 
-func refreshCache(call *inflightCall, ikey inflightKey, domain string, qtype uint16, c cache.Cache, maxPayload uint16, network string, group *upstream.Group, do bool, m *metrics.Metrics, ttlMin, ttlMax, negativeTTL int) {
+func refreshCache(call *inflightCall, ikey inflightKey, domain string, qtype uint16, c cache.Cache, maxPayload uint16, network string, group *upstream.Group, do bool, m *metrics.Metrics, ttlMin, ttlMax, negativeTTL int, ecsData []byte) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -606,7 +615,7 @@ func refreshCache(call *inflightCall, ikey inflightKey, domain string, qtype uin
 		return
 	}
 
-	entry, err := fetchFromUpstream(ctx, domain, qtype, maxPayload, network, u, do, m, ttlMin, ttlMax, negativeTTL)
+	entry, err := fetchFromUpstream(ctx, domain, qtype, maxPayload, network, u, do, m, ttlMin, ttlMax, negativeTTL, ecsData)
 	if err == nil {
 		if err := c.Set(ctx, entry); err != nil {
 			slog.Error("Background refresh cache set failed", "domain", domain, "type", qtype, "error", err)
@@ -622,7 +631,7 @@ func refreshCache(call *inflightCall, ikey inflightKey, domain string, qtype uin
 	inflightMu.Unlock()
 }
 
-func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.Group, c cache.Cache, maxPayload uint16, network string, runtimeCfg *config.RuntimeConfig, do bool, m *metrics.Metrics) (*cache.Entry, string, error) {
+func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.Group, c cache.Cache, maxPayload uint16, network string, runtimeCfg *config.RuntimeConfig, do bool, m *metrics.Metrics, ecsData []byte) (*cache.Entry, string, error) {
 	m.CacheLookups.Inc()
 	ttlMin := int(runtimeCfg.TTLMin.Load())
 	ttlMax := int(runtimeCfg.TTLMax.Load())
@@ -646,7 +655,7 @@ func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.G
 					call := &inflightCall{done: make(chan struct{})}
 					inflightCalls[ikey] = call
 					inflightMu.Unlock()
-					go refreshCache(call, ikey, domain, qtype, c, maxPayload, network, group, do, m, ttlMin, ttlMax, negativeTTL)
+					go refreshCache(call, ikey, domain, qtype, c, maxPayload, network, group, do, m, ttlMin, ttlMax, negativeTTL, ecsData)
 				} else {
 					inflightMu.Unlock()
 				}
@@ -695,7 +704,7 @@ func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.G
 	var upstreamName string
 	if len(upstreams) == 1 {
 		u := upstreams[0]
-		entry, err = fetchFromUpstream(ctx, domain, qtype, maxPayload, network, u, do, m, ttlMin, ttlMax, negativeTTL)
+		entry, err = fetchFromUpstream(ctx, domain, qtype, maxPayload, network, u, do, m, ttlMin, ttlMax, negativeTTL, ecsData)
 		if err != nil {
 			u.ReportFailure()
 			m.UpstreamFails.WithLabelValues(u.Name).Inc()
@@ -704,7 +713,7 @@ func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.G
 		}
 		upstreamName = u.Name
 	} else {
-		entry, upstreamName, err = raceUpstreams(ctx, domain, qtype, maxPayload, network, upstreams, group, do, m, ttlMin, ttlMax, negativeTTL)
+		entry, upstreamName, err = raceUpstreams(ctx, domain, qtype, maxPayload, network, upstreams, group, do, m, ttlMin, ttlMax, negativeTTL, ecsData)
 		if err != nil {
 			call.err = err
 			return nil, "", err
@@ -717,7 +726,7 @@ func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.G
 	return entry, upstreamName, nil
 }
 
-func raceUpstreams(ctx context.Context, domain string, qtype uint16, maxPayload uint16, network string, upstreams []*upstream.Upstream, group *upstream.Group, do bool, m *metrics.Metrics, ttlMin, ttlMax, negativeTTL int) (*cache.Entry, string, error) {
+func raceUpstreams(ctx context.Context, domain string, qtype uint16, maxPayload uint16, network string, upstreams []*upstream.Upstream, group *upstream.Group, do bool, m *metrics.Metrics, ttlMin, ttlMax, negativeTTL int, ecsData []byte) (*cache.Entry, string, error) {
 	type raceResult struct {
 		entry *cache.Entry
 		name  string
@@ -730,7 +739,7 @@ func raceUpstreams(ctx context.Context, domain string, qtype uint16, maxPayload 
 	for _, u := range upstreams {
 		u := u
 		go func() {
-			entry, err := fetchFromUpstream(raceCtx, domain, qtype, maxPayload, network, u, do, m, ttlMin, ttlMax, negativeTTL)
+			entry, err := fetchFromUpstream(raceCtx, domain, qtype, maxPayload, network, u, do, m, ttlMin, ttlMax, negativeTTL, ecsData)
 			select {
 			case resultCh <- raceResult{entry, u.Name, err}:
 			case <-raceCtx.Done():

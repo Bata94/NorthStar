@@ -131,7 +131,7 @@ func TestCopyRecordsWithAdjustedTTL(t *testing.T) {
 			{Name: "example.com", Type: 6, Class: 1, TTL: 8888},
 		},
 		Additionals: []dns.ResourceRecord{
-			{Name: "", Type: 41, Class: 4096, TTL: 7777},
+			{Name: "", Type: dns.TypeOPT, Class: 4096, TTL: 7777},
 		},
 	}
 	answers, authorities, additionals := e.CopyRecordsWithAdjustedTTL()

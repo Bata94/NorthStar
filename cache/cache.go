@@ -65,7 +65,7 @@ func negativeTTLFromSOA(authorities []dns.ResourceRecord, negativeTTL int) uint3
 		return uint32(negativeTTL)
 	}
 	for _, rr := range authorities {
-		if rr.Type == 6 && len(rr.RData) >= 20 {
+		if rr.Type == dns.TypeSOA && len(rr.RData) >= 20 {
 			min := binary.BigEndian.Uint32(rr.RData[len(rr.RData)-4:])
 			if min > 0 {
 				return min

@@ -147,7 +147,7 @@ func TestRoundTripOPT(t *testing.T) {
 		Header:    Header{ID: 7, Flags: 0x0100, QDCount: 1, ARCount: 1},
 		Questions: []Question{{Name: "example.com", Type: 1, Class: 1}},
 		Additionals: []ResourceRecord{{
-			Name: "", Type: 41, Class: 4096,
+			Name: "", Type: TypeOPT, Class: 4096,
 			TTL: 0, RDLength: 0,
 		}},
 	}

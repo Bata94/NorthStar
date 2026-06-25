@@ -250,10 +250,10 @@ communication.
 
 **Goal:** Full protocol compliance beyond basic forwarding.
 
-- [ ] DNSSEC validation (RRSIG verification)
-- [ ] ANY query handling (RFC 8482)
-- [ ] EDNS Client Subnet (RFC 7871)
-- [ ] DNS64 / NAT64 (RFC 6147)
+- [X] DNSSEC validation (RRSIG verification)
+- [X] ANY query handling (RFC 8482)
+- [X] EDNS Client Subnet (RFC 7871)
+- [X] DNS64 / NAT64 (RFC 6147)
 
 **Depends on:** Phase 1 (config file for policy flags)
 

@@ -50,14 +50,14 @@ func (m *Message) Question() string {
 }
 
 func (r *ResourceRecord) A() net.IP {
-	if r.Type == 1 && len(r.RData) == 4 {
+	if r.Type == TypeA && len(r.RData) == 4 {
 		return net.IP(r.RData)
 	}
 	return nil
 }
 
 func (r *ResourceRecord) AAAA() net.IP {
-	if r.Type == 28 && len(r.RData) == 16 {
+	if r.Type == TypeAAAA && len(r.RData) == 16 {
 		return net.IP(r.RData)
 	}
 	return nil

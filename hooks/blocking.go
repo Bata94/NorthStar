@@ -132,7 +132,7 @@ func trimTrailingDot(s string) string {
 
 func extractMaxPayload(req *dns.Message) uint16 {
 	for _, rr := range req.Additionals {
-		if rr.Type == 41 {
+		if rr.Type == dns.TypeOPT {
 			return rr.Class
 		}
 	}
@@ -153,13 +153,13 @@ func sendBlockedResponse(req *dns.Message, action string, sinkholeIP net.IP, q d
 		flags = 0x8000 | 0x0080
 		var rdata []byte
 		var rrType uint16
-		if sinkholeIP.To4() != nil && q.Type == 1 {
+		if sinkholeIP.To4() != nil && q.Type == dns.TypeA {
 			rdata = []byte(sinkholeIP.To4())
 			rrType = 1
-		} else if sinkholeIP.To16() != nil && sinkholeIP.To4() == nil && q.Type == 28 {
+		} else if sinkholeIP.To16() != nil && sinkholeIP.To4() == nil && q.Type == dns.TypeAAAA {
 			rdata = []byte(sinkholeIP.To16())
 			rrType = 28
-		} else if q.Type == 28 {
+		} else if q.Type == dns.TypeAAAA {
 			ipv6 := net.ParseIP("::1")
 			rdata = []byte(ipv6.To16())
 			rrType = 28
@@ -201,7 +201,7 @@ func sendBlockedResponse(req *dns.Message, action string, sinkholeIP net.IP, q d
 		Authorities: authorities,
 		Additionals: []dns.ResourceRecord{{
 			Name:  "",
-			Type:  41,
+			Type:  dns.TypeOPT,
 			Class: maxPayload,
 		}},
 	}
