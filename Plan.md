@@ -280,10 +280,31 @@ Phase 5 (transport config), Phase 6 (DNSSEC config)
 
 **Goal:** Act as an authoritative server and enforce network-level policy.
 
-- [ ] Authoritative DNS zones (RFC 1035)
-- [ ] Split-horizon DNS
-- [ ] Network-level ACLs (block/allow, zone access, upstream selection,
+- [X] Authoritative DNS zones (RFC 1035)
+  - `zone/` package — types, RData wire format, config parsing, response building
+  - Structured record config (A, AAAA, CNAME, NS, MX, SOA, TXT, SRV, DNSKEY, RRSIG, NSEC)
+  - `AuthoritativeHook` (PreResolve, prio 50) — intercepts zone queries before forwarding
+  - Longest-suffix zone matching, NXDOMAIN/NODATA responses with SOA authority
+  - Config YAML `zones` field with structured per-type record fields
+  - Full CRUD via API: `GET/POST/PUT/DELETE /api/v1/zones` + `{name}` and `/reload`
+- [X] DNSSEC signing for authoritative zones
+  - RRSIG generation with ECDSA P-256/P-384 key loading
+  - NSEC chain building for authenticated denial of existence
+  - DNSKEY record inclusion in responses when DO bit set
+  - Auto-generate signing key if no key file configured
+  - Config fields: `algorithm`, `key_file`, `zsk_file`, `nsec3`
+  - Fixed `dns.ParseRRSIG` (ignored readName offset, caused "truncated after signer name")
+- [ ] Split-horizon DNS (deferred to later phase)
+- [X] Network-level ACLs (block/allow, zone access, upstream routing,
   protocol restrictions)
+  - `acl/` package — `Rule` and `RuleSet` with client subnet, zone, protocol, upstream matching
+  - `AclHook` (PreResolve, prio 150) — allow/refuse/drop/route actions
+  - Route action sets `ctx.PreferredUpstream` for targeted upstream selection
+  - `PreferredUpstream` field in hooks context, passed through resolve()
+  - Config YAML `acls` field with subnet/zone/protocol/upstream scoping
+  - Full CRUD via API: `GET/POST/PUT/DELETE /api/v1/acls` + `{name}`
+- [X] `upstream.Group.GetByName()` method for ACL route lookups
+- [X] Hot-reload SIGHUP: zones and ACLs rebuilt on config reload
 
 **Depends on:** Phase 1 (config file, hooks), Phase 3 (upstream ACLs),
 Phase 6 (zone serving), Phase 7 (zone management via API)

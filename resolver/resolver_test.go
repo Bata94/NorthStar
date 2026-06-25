@@ -203,7 +203,7 @@ func TestResolveCacheHit(t *testing.T) {
 		}}, nil, nil, 0, 0, 0)
 	_ = c.Set(context.Background(), cachedEntry)
 
-	result, upstreamName, err := resolve(context.Background(), "example.com.", 1, g, c, 512, "udp", rc, false, m, nil)
+	result, upstreamName, err := resolve(context.Background(), "example.com.", 1, g, c, 512, "udp", rc, false, m, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestResolveCacheMissUpstream(t *testing.T) {
 	g := testGroup(t, mock.Addr())
 	defer g.Close()
 
-	result, upstreamName, err := resolve(context.Background(), "example.com.", 1, g, c, 512, "udp", rc, false, m, nil)
+	result, upstreamName, err := resolve(context.Background(), "example.com.", 1, g, c, 512, "udp", rc, false, m, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestResolveUpstreamError(t *testing.T) {
 	g := testGroup(t, "127.0.0.1:1")
 	defer g.Close()
 
-	_, _, err := resolve(context.Background(), "example.com.", 1, g, c, 512, "udp", rc, false, m, nil)
+	_, _, err := resolve(context.Background(), "example.com.", 1, g, c, 512, "udp", rc, false, m, nil, "")
 	if err == nil {
 		t.Fatal("expected error for unreachable upstream")
 	}
@@ -287,7 +287,7 @@ func TestResolveNXDOMAIN(t *testing.T) {
 	g := testGroup(t, mock.Addr())
 	defer g.Close()
 
-	result, _, err := resolve(context.Background(), "nonexistent.example.com.", 1, g, c, 512, "udp", rc, false, m, nil)
+	result, _, err := resolve(context.Background(), "nonexistent.example.com.", 1, g, c, 512, "udp", rc, false, m, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +325,7 @@ func TestResolveStaleWhileRevalidate(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	result, _, err := resolve(context.Background(), "example.com.", 1, g, c, 512, "udp", rc, false, m, nil)
+	result, _, err := resolve(context.Background(), "example.com.", 1, g, c, 512, "udp", rc, false, m, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +361,7 @@ func TestResolveInflightDedup(t *testing.T) {
 	results := make(chan *entryResult, 3)
 	for i := 0; i < 3; i++ {
 		go func() {
-			entry, _, err := resolve(ctx, "example.com.", 1, g, c, 512, "udp", rc, false, m, nil)
+			entry, _, err := resolve(ctx, "example.com.", 1, g, c, 512, "udp", rc, false, m, nil, "")
 			results <- &entryResult{entry: entry, err: err}
 		}()
 	}
@@ -400,7 +400,7 @@ func TestFetchFromUpstreamTCP(t *testing.T) {
 	g := testGroup(t, mock.Addr())
 	defer g.Close()
 
-	result, _, err := resolve(context.Background(), "example.com.", 1, g, c, 512, "tcp", rc, false, m, nil)
+	result, _, err := resolve(context.Background(), "example.com.", 1, g, c, 512, "tcp", rc, false, m, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +426,7 @@ func TestFetchFromUpstreamDNSSEC(t *testing.T) {
 	g := testGroup(t, mock.Addr())
 	defer g.Close()
 
-	result, _, err := resolve(context.Background(), "example.com.", 1, g, c, 512, "udp", rc, true, m, nil)
+	result, _, err := resolve(context.Background(), "example.com.", 1, g, c, 512, "udp", rc, true, m, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

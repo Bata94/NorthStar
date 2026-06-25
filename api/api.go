@@ -23,11 +23,13 @@ type Server struct {
 	cache    cache.Cache
 	metrics  *metrics.Metrics
 	blocking *hooks.BlockingHook
+	authHook *hooks.AuthoritativeHook
+	aclHook  *hooks.AclHook
 	http     *http.Server
 	started  time.Time
 }
 
-func New(cfg *config.Config, cfgPath string, up *upstream.Group, c cache.Cache, m *metrics.Metrics, bh *hooks.BlockingHook) *Server {
+func New(cfg *config.Config, cfgPath string, up *upstream.Group, c cache.Cache, m *metrics.Metrics, bh *hooks.BlockingHook, ah *hooks.AuthoritativeHook, ach *hooks.AclHook) *Server {
 	return &Server{
 		cfg:      cfg,
 		cfgPath:  cfgPath,
@@ -35,6 +37,8 @@ func New(cfg *config.Config, cfgPath string, up *upstream.Group, c cache.Cache, 
 		cache:    c,
 		metrics:  m,
 		blocking: bh,
+		authHook: ah,
+		aclHook:  ach,
 		started:  time.Now(),
 	}
 }
@@ -105,6 +109,19 @@ func (s *Server) Serve(ctx context.Context) error {
 	mux.HandleFunc("POST /api/v1/filter/reload", s.auth(s.handleFilterReload))
 	mux.HandleFunc("POST /api/v1/filter/test", s.auth(s.handleFilterTest))
 	mux.HandleFunc("GET /api/v1/filter/stats", s.auth(s.handleFilterStats))
+
+	mux.HandleFunc("GET /api/v1/zones", s.auth(s.handleZoneList))
+	mux.HandleFunc("GET /api/v1/zones/{name}", s.auth(s.handleZoneGet))
+	mux.HandleFunc("POST /api/v1/zones", s.auth(s.handleZoneCreate))
+	mux.HandleFunc("PUT /api/v1/zones/{name}", s.auth(s.handleZoneUpdate))
+	mux.HandleFunc("DELETE /api/v1/zones/{name}", s.auth(s.handleZoneDelete))
+	mux.HandleFunc("POST /api/v1/zones/{name}/reload", s.auth(s.handleZoneReload))
+
+	mux.HandleFunc("GET /api/v1/acls", s.auth(s.handleACLList))
+	mux.HandleFunc("GET /api/v1/acls/{name}", s.auth(s.handleACLGet))
+	mux.HandleFunc("POST /api/v1/acls", s.auth(s.handleACLCreate))
+	mux.HandleFunc("PUT /api/v1/acls/{name}", s.auth(s.handleACLUpdate))
+	mux.HandleFunc("DELETE /api/v1/acls/{name}", s.auth(s.handleACLDelete))
 
 	addr := fmt.Sprintf(":%d", s.cfg.APIPort)
 	s.http = &http.Server{Addr: addr, Handler: mux}

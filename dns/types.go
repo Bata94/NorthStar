@@ -18,5 +18,8 @@ const (
 	TypeDNSKEY = 48
 	TypeNSEC3  = 50
 	TypeHINFO  = 13
+	TypeSRV    = 33
+	TypeAXFR   = 252
+	TypeIXFR   = 251
 	TypeANY    = 255
 )

@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bata94/northstar/acl"
 	"github.com/bata94/northstar/api"
 	"github.com/bata94/northstar/cache"
 	"github.com/bata94/northstar/config"
@@ -21,6 +22,7 @@ import (
 	"github.com/bata94/northstar/resolver"
 	"github.com/bata94/northstar/tls"
 	"github.com/bata94/northstar/upstream"
+	"github.com/bata94/northstar/zone"
 )
 
 var Version = "dev"
@@ -115,8 +117,22 @@ func main() {
 	}
 	defer upstreamGroup.Close()
 
-	blockingHook, _ := buildHooksWithBlocking(&cfg, backend, m)
-	resolver.SetPipeline(buildPipeline(&cfg, backend, m))
+	zoneList, err := parseZones(&cfg)
+	if err != nil {
+		slog.Error("Failed to parse zones", "error", err)
+		os.Exit(1)
+	}
+	authHook := hooks.NewAuthoritativeHook(zoneList)
+
+	aclRuleset, err := acl.NewRuleSet(cfg.ACLs)
+	if err != nil {
+		slog.Error("Failed to parse ACLs", "error", err)
+		os.Exit(1)
+	}
+	aclHook := hooks.NewAclHook(aclRuleset)
+
+	blockingHook, _ := buildHooksWithBlocking(&cfg, backend, m, authHook, aclHook)
+	resolver.SetPipeline(buildPipeline(&cfg, backend, m, authHook, aclHook))
 
 	runtimeCfg := config.NewRuntimeConfig(&cfg)
 
@@ -129,7 +145,7 @@ func main() {
 	go func() {
 		for range sighupCh {
 			slog.Warn("SIGHUP received, reloading config...")
-			reloadConfig(runtimeCfg, upstreamGroup, backend, m)
+			reloadConfig(runtimeCfg, upstreamGroup, backend, m, authHook, aclHook)
 		}
 	}()
 
@@ -143,7 +159,7 @@ func main() {
 	}
 
 	if cfg.APIEnable {
-		apiSrv := api.New(&cfg, cfgPath, upstreamGroup, backend, m, blockingHook)
+		apiSrv := api.New(&cfg, cfgPath, upstreamGroup, backend, m, blockingHook, authHook, aclHook)
 		go func() {
 			if err := apiSrv.Serve(ctx); err != nil {
 				slog.Error("API server error", "error", err)
@@ -223,16 +239,16 @@ func main() {
 	slog.Warn("Goodbye.")
 }
 
-func buildPipeline(cfg *config.Config, c cache.Cache, m *metrics.Metrics) *hooks.Pipeline {
+func buildPipeline(cfg *config.Config, c cache.Cache, m *metrics.Metrics, authHook *hooks.AuthoritativeHook, aclHook *hooks.AclHook) *hooks.Pipeline {
 	p := hooks.NewPipeline()
-	_, hooks := buildHooksWithBlocking(cfg, c, m)
-	for _, h := range hooks {
+	_, hks := buildHooksWithBlocking(cfg, c, m, authHook, aclHook)
+	for _, h := range hks {
 		p.Register(h)
 	}
 	return p
 }
 
-func reloadConfig(runtimeCfg *config.RuntimeConfig, upstreamGroup *upstream.Group, c cache.Cache, m *metrics.Metrics) {
+func reloadConfig(runtimeCfg *config.RuntimeConfig, upstreamGroup *upstream.Group, c cache.Cache, m *metrics.Metrics, authHook *hooks.AuthoritativeHook, aclHook *hooks.AclHook) {
 	newCfg, err := config.Reload()
 	if err != nil {
 		slog.Error("Config reload failed", "error", err)
@@ -244,6 +260,16 @@ func reloadConfig(runtimeCfg *config.RuntimeConfig, upstreamGroup *upstream.Grou
 	}
 	upstreamGroup.StartHealthChecks(context.Background(), m)
 	upstreamGroup.StartSpeedAssessment(context.Background())
+	if newZones, err := parseZones(&newCfg); err == nil {
+		authHook.ReplaceZones(newZones)
+	} else {
+		slog.Error("Zone reload failed", "error", err)
+	}
+	if newACLs, err := acl.NewRuleSet(newCfg.ACLs); err == nil {
+		aclHook.ReplaceRules(newACLs)
+	} else {
+		slog.Error("ACL reload failed", "error", err)
+	}
 	if newLogLevel, ok := runtimeCfg.LogLevel.Load().(string); ok {
 		newLogMode, _ := runtimeCfg.LogMode.Load().(string)
 		if newLogMode == "" {
@@ -259,13 +285,20 @@ func reloadConfig(runtimeCfg *config.RuntimeConfig, upstreamGroup *upstream.Grou
 		}
 		slog.SetDefault(log.New(newLogLevel, newLogMode, newCfg.LogDir, newCfg.LogRetention))
 	}
-	resolver.SetPipeline(buildPipeline(&newCfg, c, m))
+	resolver.SetPipeline(buildPipeline(&newCfg, c, m, authHook, aclHook))
 	slog.Warn("Config reloaded")
 }
 
-func buildHooksWithBlocking(cfg *config.Config, c cache.Cache, m *metrics.Metrics) (*hooks.BlockingHook, []hooks.Hook) {
+func buildHooksWithBlocking(cfg *config.Config, c cache.Cache, m *metrics.Metrics, authHook *hooks.AuthoritativeHook, aclHook *hooks.AclHook) (*hooks.BlockingHook, []hooks.Hook) {
 	var result []hooks.Hook
 	var blockHook *hooks.BlockingHook
+
+	if authHook != nil && authHook.Enabled() {
+		result = append(result, authHook)
+	}
+	if aclHook != nil && aclHook.Enabled() {
+		result = append(result, aclHook)
+	}
 
 	rateCfg := cfg.Hooks.RateLimiting
 	if rateCfg.Rate == 0 && cfg.RateLimit > 0 {
@@ -359,4 +392,16 @@ func buildHooksWithBlocking(cfg *config.Config, c cache.Cache, m *metrics.Metric
 	}
 
 	return blockHook, result
+}
+
+func parseZones(cfg *config.Config) ([]*zone.Zone, error) {
+	var zones []*zone.Zone
+	for _, zc := range cfg.Zones {
+		z, err := zone.ParseZoneConfig(zc)
+		if err != nil {
+			return nil, err
+		}
+		zones = append(zones, z)
+	}
+	return zones, nil
 }

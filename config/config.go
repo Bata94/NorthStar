@@ -105,6 +105,72 @@ type DnssecHookConfig struct {
 	TrustAnchor string // path to root trust anchor file
 }
 
+type ZoneRecordConfig struct {
+	Name string `yaml:"name"`
+	Type string `yaml:"type"`
+	TTL  uint32 `yaml:"ttl"`
+
+	IP         *string `yaml:"ip,omitempty"`
+	Target     *string `yaml:"target,omitempty"`
+	Preference *uint16 `yaml:"preference,omitempty"`
+	Host       *string `yaml:"host,omitempty"`
+
+	MName   *string `yaml:"mname,omitempty"`
+	RName   *string `yaml:"rname,omitempty"`
+	Serial  *uint32 `yaml:"serial,omitempty"`
+	Refresh *uint32 `yaml:"refresh,omitempty"`
+	Retry   *uint32 `yaml:"retry,omitempty"`
+	Expire  *uint32 `yaml:"expire,omitempty"`
+	Minimum *uint32 `yaml:"minimum,omitempty"`
+
+	SRVPriority *uint16 `yaml:"srv_priority,omitempty"`
+	SRVWeight   *uint16 `yaml:"srv_weight,omitempty"`
+	SRVPort     *uint16 `yaml:"srv_port,omitempty"`
+	SRVTarget   *string `yaml:"srv_target,omitempty"`
+
+	TXTData *string `yaml:"txt_data,omitempty"`
+
+	DNSKEYFlags     *uint16 `yaml:"dnskey_flags,omitempty"`
+	DNSKEYAlgorithm *uint8  `yaml:"dnskey_algorithm,omitempty"`
+	DNSKEYPublicKey *string `yaml:"dnskey_public_key,omitempty"`
+
+	RRSIGTypeCovered *uint16 `yaml:"rrsig_type_covered,omitempty"`
+	RRSIGAlgorithm   *uint8  `yaml:"rrsig_algorithm,omitempty"`
+	RRSIGLabels      *uint8  `yaml:"rrsig_labels,omitempty"`
+	RRSIGOriginalTTL *uint32 `yaml:"rrsig_original_ttl,omitempty"`
+	RRSIGExpiration  *uint32 `yaml:"rrsig_expiration,omitempty"`
+	RRSIGInception   *uint32 `yaml:"rrsig_inception,omitempty"`
+	RRSIGKeyTag      *uint16 `yaml:"rrsig_key_tag,omitempty"`
+	RRSIGSignerName  *string `yaml:"rrsig_signer_name,omitempty"`
+	RRSIGSignature   *string `yaml:"rrsig_signature,omitempty"`
+
+	NSECNextDomain *string   `yaml:"nsec_next_domain,omitempty"`
+	NSECTypes      *[]uint16 `yaml:"nsec_types,omitempty"`
+}
+
+type ZoneDNSSECConfig struct {
+	Enabled   bool   `yaml:"enabled"`
+	Algorithm string `yaml:"algorithm"`
+	KeyFile   string `yaml:"key_file,omitempty"`
+	ZSKFile   string `yaml:"zsk_file,omitempty"`
+	NSEC3     bool   `yaml:"nsec3"`
+}
+
+type ZoneConfig struct {
+	Name    string             `yaml:"name"`
+	Records []ZoneRecordConfig `yaml:"records"`
+	DNSSEC  *ZoneDNSSECConfig  `yaml:"dnssec,omitempty"`
+}
+
+type ACLConfig struct {
+	Name     string `yaml:"name"`
+	Action   string `yaml:"action"`
+	Subnet   string `yaml:"subnet,omitempty"`
+	Zone     string `yaml:"zone,omitempty"`
+	Protocol string `yaml:"protocol,omitempty"`
+	Upstream string `yaml:"upstream,omitempty"`
+}
+
 type TLSConfig struct {
 	CertFile       string
 	KeyFile        string
@@ -157,6 +223,8 @@ type Config struct {
 	Dns64Prefix          string // NAT64 prefix, default "64:ff9b::/96"
 	EcsPrefixV4          int    // source prefix length for IPv4 (default 24)
 	EcsPrefixV6          int    // source prefix length for IPv6 (default 56)
+	Zones                []ZoneConfig
+	ACLs                 []ACLConfig
 	Hooks                HookConfig
 }
 
@@ -211,6 +279,8 @@ func Load() Config {
 		Dns64Prefix:          "64:ff9b::/96",
 		EcsPrefixV4:          24,
 		EcsPrefixV6:          56,
+		Zones:                nil,
+		ACLs:                 nil,
 		Hooks: HookConfig{
 			RateLimiting: RateLimitHookConfig{
 				Enabled:  false,
@@ -257,6 +327,8 @@ func Load() Config {
 
 	if fc, err := loadFile(cfgPath); err == nil {
 		applyFileConfig(&cfg, fc)
+		applyFileZones(&cfg, fc)
+		applyFileACLs(&cfg, fc)
 	}
 
 	applyEnvOverrides(&cfg)
@@ -327,6 +399,8 @@ func Reload() (Config, error) {
 		Dns64Prefix:          "64:ff9b::/96",
 		EcsPrefixV4:          24,
 		EcsPrefixV6:          56,
+		Zones:                nil,
+		ACLs:                 nil,
 		Hooks: HookConfig{
 			RateLimiting: RateLimitHookConfig{
 				Enabled:  false,
@@ -373,6 +447,8 @@ func Reload() (Config, error) {
 
 	if fc, err := loadFile(cfgPath); err == nil {
 		applyFileConfig(&cfg, fc)
+		applyFileZones(&cfg, fc)
+		applyFileACLs(&cfg, fc)
 	}
 
 	applyEnvOverrides(&cfg)

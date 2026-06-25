@@ -315,7 +315,7 @@ func processQuery(ctx context.Context, req *dns.Message, network, clientIP strin
 		return
 	}
 
-	entry, upstreamName, err := resolve(ctx, q.Name, q.Type, group, c, maxPayload, network, runtimeCfg, do, m, hookCtx.ECSData)
+	entry, upstreamName, err := resolve(ctx, q.Name, q.Type, group, c, maxPayload, network, runtimeCfg, do, m, hookCtx.ECSData, hookCtx.PreferredUpstream)
 	if err != nil {
 		slog.Error("Upstream error", "domain", q.Name, "type", q.Type, "error", err)
 		m.ErrorsTotal.With(prometheus.Labels{"type": "servfail"}).Inc()
@@ -631,7 +631,7 @@ func refreshCache(call *inflightCall, ikey inflightKey, domain string, qtype uin
 	inflightMu.Unlock()
 }
 
-func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.Group, c cache.Cache, maxPayload uint16, network string, runtimeCfg *config.RuntimeConfig, do bool, m *metrics.Metrics, ecsData []byte) (*cache.Entry, string, error) {
+func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.Group, c cache.Cache, maxPayload uint16, network string, runtimeCfg *config.RuntimeConfig, do bool, m *metrics.Metrics, ecsData []byte, preferredUpstream string) (*cache.Entry, string, error) {
 	m.CacheLookups.Inc()
 	ttlMin := int(runtimeCfg.TTLMin.Load())
 	ttlMax := int(runtimeCfg.TTLMax.Load())
@@ -694,7 +694,15 @@ func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.G
 	}()
 
 	var err error
-	upstreams := group.SelectN(ctx, domain, group.Concurrency)
+	var upstreams []*upstream.Upstream
+	if preferredUpstream != "" {
+		if u := group.GetByName(preferredUpstream); u != nil && u.IsHealthy() {
+			upstreams = []*upstream.Upstream{u}
+		}
+	}
+	if len(upstreams) == 0 {
+		upstreams = group.SelectN(ctx, domain, group.Concurrency)
+	}
 	if len(upstreams) == 0 {
 		err = fmt.Errorf("no healthy upstream available")
 		call.err = err

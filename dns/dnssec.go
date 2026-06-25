@@ -83,15 +83,12 @@ func ParseRRSIG(rr *ResourceRecord) (*RRSIG, error) {
 		KeyTag:        binary.BigEndian.Uint16(data[16:18]),
 	}
 	off := 18
-	name, _, err := readName(data, off, map[int]bool{})
+	name, newOff, err := readName(data, off, map[int]bool{})
 	if err != nil {
 		return nil, err
 	}
 	sig.SignerName = name
-	off += len(data) - off
-	for off < len(data) && data[off-1] != 0 {
-		off++
-	}
+	off = newOff
 	if off >= len(data) {
 		return nil, errors.New("dns: RRSIG truncated after signer name")
 	}

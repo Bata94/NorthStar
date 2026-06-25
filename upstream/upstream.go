@@ -308,6 +308,12 @@ func (g *Group) Select(ctx context.Context, domain string) (*Upstream, error) {
 	return upstreams[0], nil
 }
 
+func (g *Group) GetByName(name string) *Upstream {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.byName[name]
+}
+
 func (g *Group) Acquire(ctx context.Context, u *Upstream, network string) (net.Conn, error) {
 	switch network {
 	case "udp":

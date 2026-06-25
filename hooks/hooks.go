@@ -29,17 +29,18 @@ var (
 )
 
 type Context struct {
-	Ctx      context.Context
-	Request  *dns.Message
-	Response *dns.Message
-	ClientIP string
-	Network  string
-	Cache    cache.Cache
-	Metrics  *metrics.Metrics
-	Send     func([]byte) error
-	Entry    *cache.Entry
-	Upstream string
-	ECSData  []byte
+	Ctx               context.Context
+	Request           *dns.Message
+	Response          *dns.Message
+	ClientIP          string
+	Network           string
+	Cache             cache.Cache
+	Metrics           *metrics.Metrics
+	Send              func([]byte) error
+	Entry             *cache.Entry
+	Upstream          string
+	ECSData           []byte
+	PreferredUpstream string
 }
 
 type Hook interface {

@@ -106,6 +106,72 @@ type FileConditionalRouteConfig struct {
 	Upstream *string `yaml:"upstream"`
 }
 
+type FileZoneRecordConfig struct {
+	Name string  `yaml:"name"`
+	Type string  `yaml:"type"`
+	TTL  *uint32 `yaml:"ttl,omitempty"`
+
+	IP         *string `yaml:"ip,omitempty"`
+	Target     *string `yaml:"target,omitempty"`
+	Preference *uint16 `yaml:"preference,omitempty"`
+	Host       *string `yaml:"host,omitempty"`
+
+	MName   *string `yaml:"mname,omitempty"`
+	RName   *string `yaml:"rname,omitempty"`
+	Serial  *uint32 `yaml:"serial,omitempty"`
+	Refresh *uint32 `yaml:"refresh,omitempty"`
+	Retry   *uint32 `yaml:"retry,omitempty"`
+	Expire  *uint32 `yaml:"expire,omitempty"`
+	Minimum *uint32 `yaml:"minimum,omitempty"`
+
+	SRVPriority *uint16 `yaml:"srv_priority,omitempty"`
+	SRVWeight   *uint16 `yaml:"srv_weight,omitempty"`
+	SRVPort     *uint16 `yaml:"srv_port,omitempty"`
+	SRVTarget   *string `yaml:"srv_target,omitempty"`
+
+	TXTData *string `yaml:"txt_data,omitempty"`
+
+	DNSKEYFlags     *uint16 `yaml:"dnskey_flags,omitempty"`
+	DNSKEYAlgorithm *uint8  `yaml:"dnskey_algorithm,omitempty"`
+	DNSKEYPublicKey *string `yaml:"dnskey_public_key,omitempty"`
+
+	RRSIGTypeCovered *uint16 `yaml:"rrsig_type_covered,omitempty"`
+	RRSIGAlgorithm   *uint8  `yaml:"rrsig_algorithm,omitempty"`
+	RRSIGLabels      *uint8  `yaml:"rrsig_labels,omitempty"`
+	RRSIGOriginalTTL *uint32 `yaml:"rrsig_original_ttl,omitempty"`
+	RRSIGExpiration  *uint32 `yaml:"rrsig_expiration,omitempty"`
+	RRSIGInception   *uint32 `yaml:"rrsig_inception,omitempty"`
+	RRSIGKeyTag      *uint16 `yaml:"rrsig_key_tag,omitempty"`
+	RRSIGSignerName  *string `yaml:"rrsig_signer_name,omitempty"`
+	RRSIGSignature   *string `yaml:"rrsig_signature,omitempty"`
+
+	NSECNextDomain *string   `yaml:"nsec_next_domain,omitempty"`
+	NSECTypes      *[]uint16 `yaml:"nsec_types,omitempty"`
+}
+
+type FileZoneDNSSECConfig struct {
+	Enabled   *bool   `yaml:"enabled"`
+	Algorithm *string `yaml:"algorithm"`
+	KeyFile   *string `yaml:"key_file,omitempty"`
+	ZSKFile   *string `yaml:"zsk_file,omitempty"`
+	NSEC3     *bool   `yaml:"nsec3,omitempty"`
+}
+
+type FileZoneConfig struct {
+	Name    *string                `yaml:"name"`
+	Records []FileZoneRecordConfig `yaml:"records,omitempty"`
+	DNSSEC  *FileZoneDNSSECConfig  `yaml:"dnssec,omitempty"`
+}
+
+type FileACLConfig struct {
+	Name     *string `yaml:"name"`
+	Action   *string `yaml:"action"`
+	Subnet   *string `yaml:"subnet,omitempty"`
+	Zone     *string `yaml:"zone,omitempty"`
+	Protocol *string `yaml:"protocol,omitempty"`
+	Upstream *string `yaml:"upstream,omitempty"`
+}
+
 type FileConfig struct {
 	Mode                 *string                      `yaml:"mode"`
 	DNSPort              *int                         `yaml:"dns_port"`
@@ -148,6 +214,8 @@ type FileConfig struct {
 	EcsPrefixV4          *int                         `yaml:"ecs_prefix_v4"`
 	EcsPrefixV6          *int                         `yaml:"ecs_prefix_v6"`
 	TLS                  *FileTLSConfig               `yaml:"tls"`
+	Zones                []FileZoneConfig             `yaml:"zones,omitempty"`
+	ACLs                 []FileACLConfig              `yaml:"acls,omitempty"`
 	Hooks                *FileHookConfig              `yaml:"hooks"`
 }
 
@@ -240,6 +308,7 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 			}
 		}
 	}
+
 	if fc.CacheAddr != nil {
 		cfg.CacheAddr = *fc.CacheAddr
 	}
@@ -474,6 +543,69 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 	}
 }
 
+func fileACLToConfig(fa FileACLConfig) ACLConfig {
+	ac := ACLConfig{}
+	if fa.Name != nil {
+		ac.Name = *fa.Name
+	}
+	if fa.Action != nil {
+		ac.Action = *fa.Action
+	}
+	if fa.Subnet != nil {
+		ac.Subnet = *fa.Subnet
+	}
+	if fa.Zone != nil {
+		ac.Zone = *fa.Zone
+	}
+	if fa.Protocol != nil {
+		ac.Protocol = *fa.Protocol
+	}
+	if fa.Upstream != nil {
+		ac.Upstream = *fa.Upstream
+	}
+	return ac
+}
+
+func fileZoneRecordToConfig(fr FileZoneRecordConfig) ZoneRecordConfig {
+	zc := ZoneRecordConfig{
+		Name: fr.Name,
+		Type: fr.Type,
+	}
+	if fr.TTL != nil {
+		zc.TTL = *fr.TTL
+	}
+	zc.IP = fr.IP
+	zc.Target = fr.Target
+	zc.Preference = fr.Preference
+	zc.Host = fr.Host
+	zc.MName = fr.MName
+	zc.RName = fr.RName
+	zc.Serial = fr.Serial
+	zc.Refresh = fr.Refresh
+	zc.Retry = fr.Retry
+	zc.Expire = fr.Expire
+	zc.Minimum = fr.Minimum
+	zc.SRVPriority = fr.SRVPriority
+	zc.SRVWeight = fr.SRVWeight
+	zc.SRVPort = fr.SRVPort
+	zc.SRVTarget = fr.SRVTarget
+	zc.TXTData = fr.TXTData
+	zc.DNSKEYFlags = fr.DNSKEYFlags
+	zc.DNSKEYAlgorithm = fr.DNSKEYAlgorithm
+	zc.DNSKEYPublicKey = fr.DNSKEYPublicKey
+	zc.RRSIGTypeCovered = fr.RRSIGTypeCovered
+	zc.RRSIGAlgorithm = fr.RRSIGAlgorithm
+	zc.RRSIGLabels = fr.RRSIGLabels
+	zc.RRSIGOriginalTTL = fr.RRSIGOriginalTTL
+	zc.RRSIGExpiration = fr.RRSIGExpiration
+	zc.RRSIGInception = fr.RRSIGInception
+	zc.RRSIGKeyTag = fr.RRSIGKeyTag
+	zc.RRSIGSignerName = fr.RRSIGSignerName
+	zc.RRSIGSignature = fr.RRSIGSignature
+	zc.NSECNextDomain = fr.NSECNextDomain
+	zc.NSECTypes = fr.NSECTypes
+	return zc
+}
 func configToFile(cfg *Config) *FileConfig {
 	mode := cfg.Mode
 	dnsPort := cfg.DNSPort
@@ -597,6 +729,53 @@ func configToFile(cfg *Config) *FileConfig {
 		})
 	}
 
+	var fileZones []FileZoneConfig
+	for _, z := range cfg.Zones {
+		fileRecords := make([]FileZoneRecordConfig, len(z.Records))
+		for i, r := range z.Records {
+			fileRecords[i] = zoneRecordToFile(r)
+		}
+		fz := FileZoneConfig{
+			Name:    &z.Name,
+			Records: fileRecords,
+		}
+		if z.DNSSEC != nil {
+			fz.DNSSEC = &FileZoneDNSSECConfig{
+				Enabled:   &z.DNSSEC.Enabled,
+				Algorithm: &z.DNSSEC.Algorithm,
+				NSEC3:     &z.DNSSEC.NSEC3,
+			}
+			if z.DNSSEC.KeyFile != "" {
+				fz.DNSSEC.KeyFile = &z.DNSSEC.KeyFile
+			}
+			if z.DNSSEC.ZSKFile != "" {
+				fz.DNSSEC.ZSKFile = &z.DNSSEC.ZSKFile
+			}
+		}
+		fileZones = append(fileZones, fz)
+	}
+
+	var fileACLs []FileACLConfig
+	for _, a := range cfg.ACLs {
+		fa := FileACLConfig{
+			Name:   &a.Name,
+			Action: &a.Action,
+		}
+		if a.Subnet != "" {
+			fa.Subnet = &a.Subnet
+		}
+		if a.Zone != "" {
+			fa.Zone = &a.Zone
+		}
+		if a.Protocol != "" {
+			fa.Protocol = &a.Protocol
+		}
+		if a.Upstream != "" {
+			fa.Upstream = &a.Upstream
+		}
+		fileACLs = append(fileACLs, fa)
+	}
+
 	return &FileConfig{
 		Mode:                &mode,
 		DNSPort:             &dnsPort,
@@ -690,7 +869,50 @@ func configToFile(cfg *Config) *FileConfig {
 				TrustAnchor: &dnssecTrustAnchor,
 			},
 		},
+		Zones: fileZones,
+		ACLs:  fileACLs,
 	}
+}
+
+func zoneRecordToFile(zc ZoneRecordConfig) FileZoneRecordConfig {
+	fr := FileZoneRecordConfig{
+		Name: zc.Name,
+		Type: zc.Type,
+	}
+	if zc.TTL != 0 {
+		fr.TTL = &zc.TTL
+	}
+	fr.IP = zc.IP
+	fr.Target = zc.Target
+	fr.Preference = zc.Preference
+	fr.Host = zc.Host
+	fr.MName = zc.MName
+	fr.RName = zc.RName
+	fr.Serial = zc.Serial
+	fr.Refresh = zc.Refresh
+	fr.Retry = zc.Retry
+	fr.Expire = zc.Expire
+	fr.Minimum = zc.Minimum
+	fr.SRVPriority = zc.SRVPriority
+	fr.SRVWeight = zc.SRVWeight
+	fr.SRVPort = zc.SRVPort
+	fr.SRVTarget = zc.SRVTarget
+	fr.TXTData = zc.TXTData
+	fr.DNSKEYFlags = zc.DNSKEYFlags
+	fr.DNSKEYAlgorithm = zc.DNSKEYAlgorithm
+	fr.DNSKEYPublicKey = zc.DNSKEYPublicKey
+	fr.RRSIGTypeCovered = zc.RRSIGTypeCovered
+	fr.RRSIGAlgorithm = zc.RRSIGAlgorithm
+	fr.RRSIGLabels = zc.RRSIGLabels
+	fr.RRSIGOriginalTTL = zc.RRSIGOriginalTTL
+	fr.RRSIGExpiration = zc.RRSIGExpiration
+	fr.RRSIGInception = zc.RRSIGInception
+	fr.RRSIGKeyTag = zc.RRSIGKeyTag
+	fr.RRSIGSignerName = zc.RRSIGSignerName
+	fr.RRSIGSignature = zc.RRSIGSignature
+	fr.NSECNextDomain = zc.NSECNextDomain
+	fr.NSECTypes = zc.NSECTypes
+	return fr
 }
 
 func writeFile(path string, fc *FileConfig) error {
@@ -717,6 +939,54 @@ func writeFile(path string, fc *FileConfig) error {
 
 func WriteEffectiveConfig(path string, cfg *Config) error {
 	return writeFile(path, configToFile(cfg))
+}
+
+func applyFileZones(cfg *Config, fc *FileConfig) {
+	if fc.Zones == nil {
+		return
+	}
+	cfg.Zones = make([]ZoneConfig, len(fc.Zones))
+	for i, fz := range fc.Zones {
+		cfg.Zones[i] = ZoneConfig{}
+		if fz.Name != nil {
+			cfg.Zones[i].Name = *fz.Name
+		}
+		if fz.Records != nil {
+			cfg.Zones[i].Records = make([]ZoneRecordConfig, len(fz.Records))
+			for j, fr := range fz.Records {
+				cfg.Zones[i].Records[j] = fileZoneRecordToConfig(fr)
+			}
+		}
+		if fz.DNSSEC != nil {
+			d := &ZoneDNSSECConfig{}
+			if fz.DNSSEC.Enabled != nil {
+				d.Enabled = *fz.DNSSEC.Enabled
+			}
+			if fz.DNSSEC.Algorithm != nil {
+				d.Algorithm = *fz.DNSSEC.Algorithm
+			}
+			if fz.DNSSEC.KeyFile != nil {
+				d.KeyFile = *fz.DNSSEC.KeyFile
+			}
+			if fz.DNSSEC.ZSKFile != nil {
+				d.ZSKFile = *fz.DNSSEC.ZSKFile
+			}
+			if fz.DNSSEC.NSEC3 != nil {
+				d.NSEC3 = *fz.DNSSEC.NSEC3
+			}
+			cfg.Zones[i].DNSSEC = d
+		}
+	}
+}
+
+func applyFileACLs(cfg *Config, fc *FileConfig) {
+	if fc.ACLs == nil {
+		return
+	}
+	cfg.ACLs = make([]ACLConfig, len(fc.ACLs))
+	for i, fa := range fc.ACLs {
+		cfg.ACLs[i] = fileACLToConfig(fa)
+	}
 }
 
 func WriteDefaultConfig(path string) error {
