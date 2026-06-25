@@ -5,7 +5,10 @@ go 1.26.2
 require (
 	github.com/joho/godotenv v1.5.1
 	github.com/prometheus/client_golang v1.23.2
+	github.com/quic-go/quic-go v0.60.0
 	github.com/valkey-io/valkey-go v1.0.75
+	go.etcd.io/bbolt v1.4.0
+	go.yaml.in/yaml/v3 v3.0.4
 )
 
 require (
@@ -16,10 +19,7 @@ require (
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect
-	github.com/quic-go/quic-go v0.60.0 // indirect
-	go.etcd.io/bbolt v1.4.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/crypto v0.51.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect

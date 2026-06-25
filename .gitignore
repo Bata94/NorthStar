@@ -12,9 +12,11 @@ test-temp/
 tmp-test/
 temp-test/
 test-project/
+coverage.out
 
 bin/
 tmp/
+vendor/
 # docs/
 northstar
 northstar.yaml

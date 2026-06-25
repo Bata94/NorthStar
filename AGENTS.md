@@ -180,9 +180,19 @@ Default prod level is `warn`, so `Info` and `Debug` are invisible in prod unless
 - `github.com/prometheus/client_golang/prometheus/promhttp` — HTTP handler for metrics
 
 ## Tests
-- 6 test files: `cache/`, `config/`, `dns/`, `log/`, `metrics/`, `resolver/`
-- Run: `just test`
-- Lint: `just lint`
+- 15+ test files across 10 packages
+- `internal/testutil/` — shared helpers: MockUpstream (UDP/TCP), DNS builders, metrics/config/group factories, SendUDPQuery
+- `resolver/testdata/domains.go` — 1000+ curated domains (popular, niche, IDN, edge, diverse TLDs)
+- `resolver/output_test.go` — integration test comparing northstar vs 9.9.9.9/8.8.8.8/1.1.1.1 (build tag `integration`)
+- `resolver/blast_test.go` — blast tests: concurrent throughput, cache stress, inflight dedup stress
+- `resolver/bench_test.go` — benchmarks: resolve cache hit/miss/NXDOMAIN, parse message, pack message, concurrent resolve
+- Recipes:
+  - `just test` — basic tests (no race, no cover)
+  - `just test-fast` — `go test -count=1 -race -shuffle=on ./...`
+  - `just test-cover` — `go test -coverprofile=coverage.out -covermode=atomic ./...`
+  - `just test-all` — `go test -count=1 -race -shuffle=on -tags=integration -coverprofile=...`
+  - `just test-blast` — blast + benchmark tests only
+  - `just bench` — all benchmarks
 
 After big changes and before commits, run `just check` to run all tests and linters.
 

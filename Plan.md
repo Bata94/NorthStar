@@ -367,9 +367,12 @@ feature-complete enough to audit meaningfully
 
 **Goal:** Confidence in correctness and performance under load.
 
-- [ ] Output comparison test (9.9.9.9, 8.8.8.8, 1.1.1.1)
-- [ ] Curated 1000-domain test list
-- [ ] Blast test (1000 concurrent queries, 1 CPU core)
+- [X] Output comparison test (9.9.9.9, 8.8.8.8, 1.1.1.1) — `resolver/output_test.go`, build tag `integration`, compares RCODE, answer count, IP match, TTL divergence logging; also mocked variant without build tag
+- [X] Curated 1000-domain test list — `resolver/testdata/domains.go`, 1000+ domains across popular/niche/IDN/edge/diverse categories
+- [X] Blast test (1000 concurrent queries, 1 CPU core) — `resolver/blast_test.go`, 3 tests: concurrent throughput (36K QPS), cache stress (0 upstream calls for cached), inflight dedup (1 upstream call for 200 concurrent)
+- [X] Benchmarks — `resolver/bench_test.go`, 6 benchmarks (resolve cache hit/miss/NXDOMAIN, parse message, pack message, concurrent resolve)
+- [X] Shared test utilities — `internal/testutil/testutil.go`, MockUpstream, DNS builders, metrics/config/group factories, UDP query sender
+- [X] Justfile updates — `test-fast`, `test-cover`, `test-all`, `test-blast`, `bench` recipes
 
 **Depends on:** All features deployed and stable
 
@@ -381,6 +384,8 @@ feature-complete enough to audit meaningfully
 
 - [ ] Find all relevant RFCs and other Web standards
 - [ ] Implement and test against them
+- [ ] Valkey-backed integration tests — exercise Valkey cache backend with real Valkey instance (via testcontainers-go); cover TryLock/Unlock, cross-node dedup, rate-limit counter consistency
+- [ ] Fuzz tests for DNS wire format parsing — `*_fuzz_test.go` for `dns.Message.Parse()`, `dns.readName()`, `dns.writeName()`, compression edge cases
 
 **Depends on:** All features deployed and stable
 
@@ -390,6 +395,7 @@ feature-complete enough to audit meaningfully
 
 **Goal:** End-to-end distributed trace visibility for multi-node deployments.
 
+- [ ] Cross-node integration tests — docker-compose-based orchestration from within tests; verify distributed lock, cache stampede prevention, stale-while-revalidate, and rate-limit consistency across 2+ northstar instances sharing Valkey
 - [ ] OpenTelemetry integration
   - Dependencies: `go.opentelemetry.io/otel`, SDK, OTLP exporter (gRPC/HTTP)
   - Config: `tracing_enable`, `tracing_endpoint` (`localhost:4317`),

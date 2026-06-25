@@ -13,6 +13,21 @@ run:
 test:
 	go test -v ./...
 
+test-fast:
+	go test -count=1 -race -shuffle=on ./...
+
+test-cover:
+	go test -coverprofile=coverage.out -covermode=atomic ./...
+
+test-all:
+	go test -count=1 -race -shuffle=on -tags=integration -coverprofile=coverage.out -covermode=atomic ./...
+
+test-blast:
+	go test -v -run 'TestBlast|Benchmark' -timeout=5m ./resolver/
+
+bench:
+	go test -bench=. -benchmem -benchtime=1x ./resolver/
+
 fmt:
 	go fmt ./...
 
@@ -28,6 +43,12 @@ check:
   just lint
   just test
   just build
+
+  just test-fast
+  just test-cover
+  just test-all
+  just test-blast
+  just bench
 
 alias dc := run-docker
 run-docker:

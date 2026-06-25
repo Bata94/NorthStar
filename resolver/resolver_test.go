@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"io"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -346,9 +347,9 @@ func TestResolveInflightDedup(t *testing.T) {
 	c := cache.NewMemory(0, nil)
 	defer c.Close()
 
-	var callCount int
+	var callCount atomic.Int64
 	mock := startMockUpstream(t, "udp", func(data []byte) []byte {
-		callCount++
+		callCount.Add(1)
 		time.Sleep(50 * time.Millisecond)
 		return testResponse(t, "example.com.", 1)
 	})
@@ -376,8 +377,8 @@ func TestResolveInflightDedup(t *testing.T) {
 		}
 	}
 
-	if callCount != 1 {
-		t.Errorf("expected 1 upstream call (inflight dedup), got %d", callCount)
+	if callCount.Load() != 1 {
+		t.Errorf("expected 1 upstream call (inflight dedup), got %d", callCount.Load())
 	}
 }
 
