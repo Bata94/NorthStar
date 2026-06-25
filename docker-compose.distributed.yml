@@ -1,0 +1,100 @@
+# northstar — Cross-Host Distributed Deployment
+#
+# Start Valkey on one host, then northstar instances on each host.
+#
+# Host 1 (Valkey + northstar-1):
+#   docker compose -f docker-compose.distributed.yml up valkey northstar-1
+#
+# Host 2 (northstar-2):
+#   NORTHSTAR_CACHE_ADDR=<host1-ip>:6379 \
+#   docker compose -f docker-compose.distributed.yml up northstar-2
+#
+# Host 3 (northstar-3):
+#   NORTHSTAR_CACHE_ADDR=<host1-ip>:6379 \
+#   docker compose -f docker-compose.distributed.yml up northstar-3
+services:
+  valkey:
+    image: valkey/valkey:alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  northstar-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: prod
+    ports:
+      - "53:53"
+      - "53:53/udp"
+      - "9153:9153"
+      - "9163:9163"
+    cap_add:
+      - NET_BIND_SERVICE
+    environment:
+      NORTHSTAR_CACHE_ADDR: valkey:6379
+      NORTHSTAR_NODE_NAME: northstar-1
+      NORTHSTAR_NODE_ID: node1
+      NORTHSTAR_METRICS_ENABLE: "true"
+      NORTHSTAR_METRICS_PORT: "9153"
+      NORTHSTAR_API_ENABLE: "true"
+      NORTHSTAR_API_PORT: "9163"
+    depends_on:
+      - valkey
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2048M
+
+  northstar-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: prod
+    ports:
+      - "53:53"
+      - "53:53/udp"
+      - "9154:9153"
+      - "9164:9163"
+    cap_add:
+      - NET_BIND_SERVICE
+    environment:
+      NORTHSTAR_CACHE_ADDR: valkey:6379
+      NORTHSTAR_NODE_NAME: northstar-2
+      NORTHSTAR_NODE_ID: node2
+      NORTHSTAR_METRICS_ENABLE: "true"
+      NORTHSTAR_METRICS_PORT: "9153"
+      NORTHSTAR_API_ENABLE: "true"
+      NORTHSTAR_API_PORT: "9163"
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2048M
+
+  northstar-3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: prod
+    ports:
+      - "53:53"
+      - "53:53/udp"
+      - "9155:9153"
+      - "9165:9163"
+    cap_add:
+      - NET_BIND_SERVICE
+    environment:
+      NORTHSTAR_CACHE_ADDR: valkey:6379
+      NORTHSTAR_NODE_NAME: northstar-3
+      NORTHSTAR_NODE_ID: node3
+      NORTHSTAR_METRICS_ENABLE: "true"
+      NORTHSTAR_METRICS_PORT: "9153"
+      NORTHSTAR_API_ENABLE: "true"
+      NORTHSTAR_API_PORT: "9163"
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2048M

@@ -43,7 +43,7 @@ func TestRateLimitHook(t *testing.T) {
 
 	m := metrics.New()
 
-	hook := NewRateLimitHook(5, "servfail", 100, true)
+	hook := NewRateLimitHook(5, "servfail", 100, true, false)
 	p := NewPipeline()
 	p.Register(hook)
 
@@ -79,7 +79,7 @@ func TestRateLimitHookDropAction(t *testing.T) {
 
 	m := metrics.New()
 
-	hook := NewRateLimitHook(1, "drop", 100, true)
+	hook := NewRateLimitHook(1, "drop", 100, true, false)
 	p := NewPipeline()
 	p.Register(hook)
 
@@ -115,14 +115,14 @@ func TestRateLimitHookDropAction(t *testing.T) {
 }
 
 func TestDisabledHook(t *testing.T) {
-	hook := NewRateLimitHook(5, "servfail", 100, false)
+	hook := NewRateLimitHook(5, "servfail", 100, false, false)
 	if hook.Enabled() {
 		t.Error("disabled hook should not be enabled")
 	}
 }
 
 func TestRateLimitZeroRate(t *testing.T) {
-	hook := NewRateLimitHook(0, "servfail", 100, true)
+	hook := NewRateLimitHook(0, "servfail", 100, true, false)
 	if hook.Enabled() {
 		t.Error("zero-rate hook should not be enabled")
 	}
@@ -130,7 +130,7 @@ func TestRateLimitZeroRate(t *testing.T) {
 
 func TestPipelineReset(t *testing.T) {
 	p := NewPipeline()
-	hook := NewRateLimitHook(5, "servfail", 100, true)
+	hook := NewRateLimitHook(5, "servfail", 100, true, false)
 	p.Register(hook)
 
 	p.Reset()

@@ -5,6 +5,7 @@ package cache
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"fmt"
 	"log/slog"
@@ -22,9 +23,10 @@ const (
 )
 
 type Valkey struct {
-	client   valkey.Client
-	staleAge time.Duration
-	metrics  *metrics.Metrics
+	client      valkey.Client
+	staleAge    time.Duration
+	metrics     *metrics.Metrics
+	lockOwnerID string
 }
 
 func NewValkey(addr string, staleAge int, m *metrics.Metrics) (*Valkey, error) {
@@ -43,7 +45,14 @@ func NewValkey(addr string, staleAge int, m *metrics.Metrics) (*Valkey, error) {
 		return nil, fmt.Errorf("valkey ping: %w", err)
 	}
 
-	return &Valkey{client: client, staleAge: time.Duration(staleAge) * time.Second, metrics: m}, nil
+	b := make([]byte, 8)
+	rand.Read(b)
+	return &Valkey{
+		client:      client,
+		staleAge:    time.Duration(staleAge) * time.Second,
+		metrics:     m,
+		lockOwnerID: fmt.Sprintf("%x", b),
+	}, nil
 }
 
 func (v *Valkey) Get(ctx context.Context, domain string, qtype uint16) (*Entry, bool) {
@@ -279,6 +288,48 @@ func (v *Valkey) Incr(ctx context.Context, key string, ttl time.Duration) (int64
 	return val, nil
 }
 
+func (v *Valkey) TryLock(ctx context.Context, key string, ttl time.Duration) (bool, error) {
+	err := v.client.Do(ctx, v.client.B().Set().Key(key).Value(v.lockOwnerID).Nx().Ex(ttl).Build()).Error()
+	if err != nil {
+		if valkey.IsValkeyNil(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (v *Valkey) Unlock(ctx context.Context, key string) error {
+	script := valkey.NewLuaScript(`
+		if redis.call("GET", KEYS[1]) == ARGV[1] then
+			return redis.call("DEL", KEYS[1])
+		end
+		return 0
+	`)
+	return script.Exec(ctx, v.client, []string{key}, []string{v.lockOwnerID}).Error()
+}
+
+func (v *Valkey) Flush(ctx context.Context) error {
+	var cursor uint64
+	for {
+		result := v.client.Do(ctx, v.client.B().Scan().Cursor(cursor).Match("northstar:*").Count(1000).Build())
+		entry, err := result.AsScanEntry()
+		if err != nil {
+			return err
+		}
+		if len(entry.Elements) > 0 {
+			if err := v.client.Do(ctx, v.client.B().Del().Key(entry.Elements...).Build()).Error(); err != nil {
+				return err
+			}
+		}
+		if entry.Cursor == 0 {
+			break
+		}
+		cursor = entry.Cursor
+	}
+	return nil
+}
+
 func (v *Valkey) Close() {
 	v.client.Close()
 }
@@ -286,3 +337,5 @@ func (v *Valkey) Close() {
 func (v *Valkey) key(domain string, qtype uint16) string {
 	return fmt.Sprintf("northstar:%s:%d", domain, qtype)
 }
+
+var _ Cache = (*Valkey)(nil)

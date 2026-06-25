@@ -11,8 +11,32 @@ services:
     cap_add:
       - NET_BIND_SERVICE
     env_file: prod.env
-    # depends_on:
-    #   - valkey
+    depends_on:
+      - valkey
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2048M
+
+  northstar-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: prod
+    ports:
+      - "9054:53"
+      - "9054:53/udp"
+      - "9154:9153"
+    cap_add:
+      - NET_BIND_SERVICE
+    environment:
+      NORTHSTAR_DNS_PORT: "9054"
+      NORTHSTAR_METRICS_PORT: "9154"
+      NORTHSTAR_NODE_NAME: "northstar-2"
+      NORTHSTAR_NODE_ID: "node2"
+    depends_on:
+      - valkey
     deploy:
       resources:
         limits:
@@ -33,13 +57,13 @@ services:
     volumes:
       - .:/app
     env_file: dev.env
-    # depends_on:
-    #   - valkey
+    depends_on:
+      - valkey
 
-  # valkey:
-  #   image: valkey/valkey:alpine
-  #   restart: unless-stopped
-  #
+  valkey:
+    image: valkey/valkey:alpine
+    restart: unless-stopped
+
   # redisinsight:
   #   image: redis/redisinsight:latest
   #   ports:

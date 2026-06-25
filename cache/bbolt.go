@@ -20,6 +20,8 @@ type Bbolt struct {
 	stopCh   chan struct{}
 	wg       sync.WaitGroup
 	metrics  *metrics.Metrics
+	locks    map[string]bool
+	locksMu  sync.Mutex
 }
 
 func NewBbolt(path string, staleAge int, m *metrics.Metrics) (*Bbolt, error) {
@@ -41,6 +43,7 @@ func NewBbolt(path string, staleAge int, m *metrics.Metrics) (*Bbolt, error) {
 		staleAge: time.Duration(staleAge) * time.Second,
 		stopCh:   make(chan struct{}),
 		metrics:  m,
+		locks:    make(map[string]bool),
 	}
 	b.wg.Add(1)
 	go b.evictLoop()
@@ -296,6 +299,38 @@ func (b *Bbolt) Incr(_ context.Context, key string, ttl time.Duration) (int64, e
 		return 0, err
 	}
 	return val, nil
+}
+
+func (b *Bbolt) TryLock(_ context.Context, key string, _ time.Duration) (bool, error) {
+	b.locksMu.Lock()
+	defer b.locksMu.Unlock()
+	if b.locks == nil {
+		b.locks = make(map[string]bool)
+	}
+	if b.locks[key] {
+		return false, nil
+	}
+	b.locks[key] = true
+	return true, nil
+}
+
+func (b *Bbolt) Unlock(_ context.Context, key string) error {
+	b.locksMu.Lock()
+	defer b.locksMu.Unlock()
+	if b.locks != nil {
+		delete(b.locks, key)
+	}
+	return nil
+}
+
+func (b *Bbolt) Flush(_ context.Context) error {
+	return b.db.Update(func(tx *bbolt.Tx) error {
+		if err := tx.DeleteBucket([]byte("entries")); err != nil {
+			return err
+		}
+		_, err := tx.CreateBucket([]byte("entries"))
+		return err
+	})
 }
 
 func (b *Bbolt) Close() {

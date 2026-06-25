@@ -7,13 +7,14 @@
 
 ```
 main.go
-  └─ config.Load() → Config{Mode, DNSPort, UpstreamAddr, CacheAddr, Listeners, TcpDisable, RateLimit, StaleAge, UpstreamPoolSize, UpstreamPoolIdle, LogLevel, LogMode, LogDir, LogRetention, TimeZone, MetricsEnable, MetricsPort, ConfigPath, Hooks}
+  └─ config.Load() → Config{Mode, DNSPort, UpstreamAddr, CacheAddr, Listeners, TcpDisable, RateLimit, StaleAge, UpstreamPoolSize, UpstreamPoolIdle, LogLevel, LogMode, LogDir, LogRetention, TimeZone, MetricsEnable, MetricsPort, ConfigPath, Hooks, NodeName, NodeID, ReusePort, ReusePortWorkers, RateLimitFailClose}
   │    └─ load YAML file (env NORTHSTAR_CONFIG or ./northstar.yaml)
   │    └─ overlay env vars on top (env > file > defaults)
   │    └─ auto-generate default file if missing (main.go pre-flight)
+  └─ node.InstanceID() + node.NodeName(cfg.NodeName) → instance identity (startup log, API /status)
   └─ config.NewRuntimeConfig(&cfg) → atomic runtime values for SIGHUP reload
   └─ buildPipeline(&cfg, cache, metrics) → resolver.SetPipeline(p) (atomic swap)
-  └─ cache.NewMemory(maxEntries, m) or cache.NewValkey(addr, staleAge, m) or cache.NewBbolt(path, staleAge, m) → cache.Cache (metrics for eviction counters)
+  └─ cache.NewMemory(maxEntries, m) or cache.NewValkey(addr, staleAge, m) or cache.NewBbolt(path, staleAge, m) → cache.Cache (metrics for eviction counters; TryLock/Unlock for cross-node coordination)
   └─ log.New(level, mode) → slog.Logger (consoleHandler + JSON file)
   └─ metrics.New() → *metrics.Metrics (custom prometheus registry)
   └─ if DebugEnable → /debug/pprof/ mounted on metrics HTTP server
@@ -31,13 +32,17 @@ main.go
   │              ├─ m.QueriesTotal (by qtype)
   │              ├─ pipeline.Run(PreResolve, hookCtx) → rate limiting via hook
   │              │    └─ RateLimitHook: cache.Incr(key, 1s) → SERVFAIL if exceeded
-  │              ├─ resolve(ctx, Name, Type, upstream, cache, maxPayload, network, staleAge, pool, do, m)
-  │              │    ├─ m.CacheLookups.Inc()
-  │              │    ├─ cache.Peek(ctx, domain, qtype) → fresh hit → m.CacheHits.Inc(), return
-  │              │    ├─ stale-while-revalidate: if staleAge > 0 && stale.Peek → refreshCache() goroutine, return stale
-  │              │    ├─ inflight dedup: inflightKey{domain,qtype} → wait or become leader
-  │              │    │   └─ on failed inflight call → delete from map, fall through to direct fetch
-  │              │    └─ fetchFromUpstream(ctx, domain, qtype, maxPayload, network, pool, do, m)
+   │              ├─ resolve(ctx, Name, Type, upstream, cache, maxPayload, network, staleAge, pool, do, m)
+   │              │    ├─ m.CacheLookups.Inc()
+   │              │    ├─ cache.Peek(ctx, domain, qtype) → fresh hit → m.CacheHits.Inc(), return
+   │              │    ├─ stale-while-revalidate: if staleAge > 0 && stale.Peek → refreshCache() goroutine, return stale
+   │              │    │   └─ cross-node: cache.TryLock("northstar:inflight:stale:...") → elects one refresher
+   │              │    ├─ inflight dedup: inflightKey{domain,qtype} → wait or become leader (local-only)
+   │              │    ├─ cross-node dedup: cache.TryLock("northstar:inflight:...") → leader fetches, losers poll Peek
+   │              │    │   └─ lock key: "northstar:inflight:<domain>:<qtype>" with 10s TTL
+   │              │    │   └─ poll loop: 50ms sleep × 100 iterations (5s max)
+   │              │    │   └─ on poll timeout → fall through to direct fetch
+   │              │    └─ fetchFromUpstream(ctx, domain, qtype, maxPayload, network, pool, do, m)
   │              ├─ pipeline.Run(PostResolve, hookCtx)  (noop in Phase 1)
   │              ├─ entry.CopyRecordsWithAdjustedTTL() → build response
   │              ├─ pipeline.Run(PreResponse, hookCtx)  (noop in Phase 1)
@@ -108,11 +113,22 @@ Default prod level is `warn`, so `Info` and `Debug` are invisible in prod unless
 - `QueryLogHook` (PostResponse, prio 900) — CSV per-request log with daily rotation; fields: timestamp, client_ip, qname, qtype, rcode, latency_ms, cache_decision, upstream
 - Phase 1: only `RateLimitHook` is wired; other lifecycle points are placeholders
 
+### `lock`
+- Distributed mutex backed by Valkey (`SET NX EX` for TryLock, Lua script for safe Unlock)
+- `NewMutex(client, key, ttl)` — generates random owner ID
+- `InProcessMutex` — in-process sync.Mutex fallback for non-Valkey backends
+
+### `node`
+- `InstanceID()` — random UUID generated once per process via `crypto/rand`
+- `NodeName(cfgName)` — configurable name, falls back to `os.Hostname()`
+
 ### `resolver`
 - No globals except `inflightCalls` map and `pipelinePtr` atomic (package-level, shared across listeners)
 - `SetPipeline(p)` — atomically swaps the hook pipeline; called at startup and on SIGHUP reload
 - `processQuery` loads the current pipeline via `pipelinePtr.Load()` on each request, ensuring SIGHUP reloads take effect immediately without race conditions
 - `Serve` (UDP) / `ServeTCP` — accept loops with 1s deadline for ctx polling, graceful drain (5s timeout)
+- SO_REUSEPORT: `listenConfig(reusePort bool)` returns `net.ListenConfig` with `Control` func setting SO_REUSEPORT socket option; uses syscall constants (0x0F on Linux, 0x0200 on Darwin)
+- Multiple workers: when `ReusePortWorkers > 1`, main.go spawns N goroutines per listener, each getting its own socket via SO_REUSEPORT; kernel distributes UDP/TCP packets across workers
 - `inflightKey{domain, qtype}` / `inflightCall{done, entry, err, once}` — dedup concurrent queries for same domain+qtype; secondary callers wait on `call.done`
 - `refreshCache()` — background goroutine for stale-while-revalidate; fetches from upstream, updates cache, closes `call.done`, deletes from `inflightCalls`
 - `fetchFromUpstream()` — acquires connection from pool, forwards query (UDP raw or TCP length-prefixed), parses reply, releases connection; measures latency with deferred `m.UpstreamLatency.Observe()`
@@ -208,6 +224,8 @@ For commits use commly used conventions and prefix commit messages with `feat:`,
 - Default port 8053 (override via `NORTHSTAR_DNS_PORT`)
 - Resource limits: 2 CPUs, 2048M memory per service
 - `.env` + `environment:` compose block for configuration
+- Multi-node same-host: set `NORTHSTAR_REUSE_PORT=true`, shared `NORTHSTAR_CACHE_ADDR=valkey:6379`, distinct ports for metrics/API
+- Cross-node dedup: uses `cache.TryLock` via Valkey; each node's `inflightCalls` map adds fast local dedup on top
 
 ## License
 - MIT + Commons Clause v1.0 — see `LICENSE`

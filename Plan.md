@@ -136,12 +136,15 @@
 
 ## Scaling & Multi-Node
 
-- Shared-state race condition audit — systematically review
+- [X] Shared-state race condition audit — systematically review
   Valkey-based coordination for races (inflight dedup across
   nodes, rate-limit counter consistency, cache stampede prevention)
-- SO_REUSEPORT — allow multiple listener goroutines to share
+- [X] SO_REUSEPORT — allow multiple listener goroutines to share
   the same UDP/TCP port for better CPU utilization on multi-core
   systems
+- [X] Instance identity — UUID per process, configurable NodeName/NodeID
+- [X] Cross-node cache stampede prevention — distributed lock + poll
+- [X] Cross-node stale-while-revalidate — distributed lock
 
 ## Extended Testing & Benchmarking
 
@@ -344,9 +347,16 @@ upstreams, zones), Phase 7 (metrics in API)
 
 **Goal:** Safe multi-instance deployments and better CPU utilization.
 
-- [ ] Shared-state race condition audit (Valkey coordination)
-- [ ] SO_REUSEPORT
-- [ ] Setups for MutliNode SameHost and DifferentHosts
+- [X] Instance identity (node/ package) — UUID per process, configurable NodeName/NodeID, exposed via API/status
+- [X] Distributed lock package (lock/) — Valkey-based mutex with SET NX EX + Lua safe unlock; InProcessMutex fallback for non-Valkey backends
+- [X] Cross-node cache stampede prevention — distributed lock before upstream fetch; losers poll Peek() with backoff
+- [X] Cross-node stale-while-revalidate — distributed lock elects one refresher per stale entry; others skip
+- [X] Cache flush API fix — replaced broken `s.cache = cache.NewMemory(0, nil)` with `Cache.Flush()` interface method
+- [X] Rate limit fail-close option — `RateLimitFailClose` config; on Valkey error, fail closed (SERVFAIL all) vs fail open (allow all)
+- [X] SO_REUSEPORT — ListenConfig with Control function; configurable worker count (default 1)
+- [X] Config: ReusePort, ReusePortWorkers, NodeName, NodeID, RateLimitFailClose
+- [X] Setups for MultiNode SameHost and DifferentHosts (Docker Compose)
+- [X] Extended tests for lock (6 tests), SO_REUSEPORT (3 tests: UDP+TCP listen, disabled Control, GetsockoptInt verification)
 
 **Depends on:** Phase 2 (bbolt for Valkey alternatives), everything else
 feature-complete enough to audit meaningfully

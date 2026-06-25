@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"strconv"
 	"time"
-
-	"github.com/bata94/northstar/cache"
 )
 
 func (s *Server) handleCacheStats(w http.ResponseWriter, r *http.Request) {
@@ -19,8 +17,10 @@ func (s *Server) handleCacheStats(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCacheFlush(w http.ResponseWriter, r *http.Request) {
 	entries := s.cache.Len()
-	if entries > 0 {
-		s.cache = cache.NewMemory(0, nil)
+	if err := s.cache.Flush(r.Context()); err != nil {
+		slog.Error("Cache flush failed", "error", err)
+		writeInternalError(w, "cache flush", err)
+		return
 	}
 	slog.Info("Cache flushed via API", "entries_removed", entries)
 	writeOK(w, map[string]any{"entries_removed": entries})

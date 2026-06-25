@@ -13,8 +13,9 @@ import (
 )
 
 type Listener struct {
-	IP   string
-	Port int
+	IP        string
+	Port      int
+	ReusePort bool
 }
 
 type RateLimitHookConfig struct {
@@ -189,6 +190,8 @@ type TLSConfig struct {
 
 type Config struct {
 	Mode                 string
+	NodeName             string
+	NodeID               string
 	DNSPort              int
 	UpstreamAddr         string // deprecated, use Upstreams
 	Upstreams            []UpstreamConfig
@@ -234,6 +237,9 @@ type Config struct {
 	EcsPrefixV6          int    // source prefix length for IPv6 (default 56)
 	Zones                []ZoneConfig
 	ACLs                 []ACLConfig
+	ReusePort            bool
+	ReusePortWorkers     int
+	RateLimitFailClose   bool
 	Hooks                HookConfig
 }
 
@@ -248,6 +254,8 @@ func Load() Config {
 	cfg := Config{
 		ConfigPath:   cfgPath,
 		Mode:         "prod",
+		NodeName:     "",
+		NodeID:       "",
 		DNSPort:      53,
 		UpstreamAddr: "8.8.8.8:53",
 		CacheAddr:    "",
@@ -289,6 +297,9 @@ func Load() Config {
 		Dns64Prefix:          "64:ff9b::/96",
 		EcsPrefixV4:          24,
 		EcsPrefixV6:          56,
+		ReusePort:            true,
+		ReusePortWorkers:     0,
+		RateLimitFailClose:   false,
 		Zones:                nil,
 		ACLs:                 nil,
 		Hooks: HookConfig{
@@ -358,7 +369,7 @@ func Load() Config {
 		cfg.UpstreamConcurrency = 1
 	}
 
-	cfg.Listeners = buildListeners(cfg.DNSPort, cfg.Ipv4Disable, cfg.Ipv6Disable)
+	cfg.Listeners = buildListeners(cfg.DNSPort, cfg.Ipv4Disable, cfg.Ipv6Disable, cfg.ReusePort)
 
 	return cfg
 }
@@ -374,6 +385,8 @@ func Reload() (Config, error) {
 	cfg := Config{
 		ConfigPath:   cfgPath,
 		Mode:         "prod",
+		NodeName:     "",
+		NodeID:       "",
 		DNSPort:      53,
 		UpstreamAddr: "8.8.8.8:53",
 		CacheAddr:    "",
@@ -415,6 +428,9 @@ func Reload() (Config, error) {
 		Dns64Prefix:          "64:ff9b::/96",
 		EcsPrefixV4:          24,
 		EcsPrefixV6:          56,
+		ReusePort:            true,
+		ReusePortWorkers:     0,
+		RateLimitFailClose:   false,
 		Zones:                nil,
 		ACLs:                 nil,
 		Hooks: HookConfig{
@@ -484,7 +500,7 @@ func Reload() (Config, error) {
 		cfg.UpstreamConcurrency = 1
 	}
 
-	cfg.Listeners = buildListeners(cfg.DNSPort, cfg.Ipv4Disable, cfg.Ipv6Disable)
+	cfg.Listeners = buildListeners(cfg.DNSPort, cfg.Ipv4Disable, cfg.Ipv6Disable, cfg.ReusePort)
 
 	return cfg, nil
 }
@@ -504,6 +520,12 @@ func loadDotEnv() {
 func applyEnvOverrides(cfg *Config) {
 	if v, ok := os.LookupEnv("NORTHSTAR_MODE"); ok {
 		cfg.Mode = v
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_NODE_NAME"); ok {
+		cfg.NodeName = v
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_NODE_ID"); ok {
+		cfg.NodeID = v
 	}
 	if v, ok := os.LookupEnv("NORTHSTAR_DNS_PORT"); ok {
 		cfg.DNSPort = atoiOrZero(v)
@@ -574,6 +596,15 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v, ok := os.LookupEnv("NORTHSTAR_DNS_MAX_TCP_CONNS_PER_CLIENT"); ok {
 		cfg.MaxTCPConnsPerClient = atoiOrZero(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_REUSE_PORT"); ok {
+		cfg.ReusePort = isTrue(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_REUSE_PORT_WORKERS"); ok {
+		cfg.ReusePortWorkers = atoiOrZero(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_RATE_LIMIT_FAIL_CLOSE"); ok {
+		cfg.RateLimitFailClose = isTrue(v)
 	}
 	if v, ok := os.LookupEnv("NORTHSTAR_DEBUG_ENABLE"); ok {
 		cfg.DebugEnable = isTrue(v)
@@ -711,16 +742,16 @@ func migrateUpstreams(cfg *Config) {
 	}
 }
 
-func buildListeners(port int, disableIPv4, disableIPv6 bool) []Listener {
+func buildListeners(port int, disableIPv4, disableIPv6 bool, reusePort bool) []Listener {
 	if !disableIPv4 && !disableIPv6 {
-		return []Listener{{IP: "::", Port: port}}
+		return []Listener{{IP: "::", Port: port, ReusePort: reusePort}}
 	}
 	var listeners []Listener
 	if !disableIPv4 {
-		listeners = append(listeners, Listener{IP: "0.0.0.0", Port: port})
+		listeners = append(listeners, Listener{IP: "0.0.0.0", Port: port, ReusePort: reusePort})
 	}
 	if !disableIPv6 {
-		listeners = append(listeners, Listener{IP: "::", Port: port})
+		listeners = append(listeners, Listener{IP: "::", Port: port, ReusePort: reusePort})
 	}
 	return listeners
 }

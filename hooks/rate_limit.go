@@ -13,18 +13,20 @@ import (
 )
 
 type RateLimitHook struct {
-	Rate     int
-	Action   string
-	priority int
-	enabled  bool
+	Rate      int
+	Action    string
+	FailClose bool
+	priority  int
+	enabled   bool
 }
 
-func NewRateLimitHook(rate int, action string, priority int, enabled bool) *RateLimitHook {
+func NewRateLimitHook(rate int, action string, priority int, enabled bool, failClose bool) *RateLimitHook {
 	return &RateLimitHook{
-		Rate:     rate,
-		Action:   action,
-		priority: priority,
-		enabled:  enabled,
+		Rate:      rate,
+		Action:    action,
+		FailClose: failClose,
+		priority:  priority,
+		enabled:   enabled,
 	}
 }
 
@@ -38,6 +40,11 @@ func (h *RateLimitHook) Handle(ctx *Context) error {
 	val, err := ctx.Cache.Incr(ctx.Ctx, key, time.Second)
 	if err != nil {
 		slog.Error("Rate limit cache error", "error", err)
+		if h.FailClose {
+			ctx.Metrics.ErrorsTotal.With(prometheus.Labels{"type": "rate_limited"}).Inc()
+			sendServfail(ctx.Request, ctx.Send)
+			return ErrRateLimited
+		}
 		return nil
 	}
 	if val > int64(h.Rate) {

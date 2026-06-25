@@ -62,6 +62,9 @@ type Cache interface {
 	Len() int
 	Evictions() int64
 	Warmup(ctx context.Context, dest Cache) error
+	TryLock(ctx context.Context, key string, ttl time.Duration) (bool, error)
+	Unlock(ctx context.Context, key string) error
+	Flush(ctx context.Context) error
 	Close()
 }
 
@@ -169,6 +172,8 @@ type Memory struct {
 	mu         sync.Mutex
 	counters   map[string]*counterEntry
 	countersMu sync.Mutex
+	locks      map[string]bool
+	locksMu    sync.Mutex
 	stopCh     chan struct{}
 	evictions  atomic.Int64
 	metrics    *metrics.Metrics
@@ -182,6 +187,7 @@ func NewMemory(maxEntries int, m *metrics.Metrics) *Memory {
 		counters:   make(map[string]*counterEntry),
 		stopCh:     make(chan struct{}),
 		metrics:    m,
+		locks:      make(map[string]bool),
 	}
 	go mem.evictLoop()
 	return mem
@@ -246,6 +252,33 @@ func (m *Memory) evictOne() {
 			m.metrics.CacheEvictionsTotal.WithLabelValues("memory").Inc()
 		}
 	}
+}
+
+func (m *Memory) TryLock(_ context.Context, key string, _ time.Duration) (bool, error) {
+	m.locksMu.Lock()
+	defer m.locksMu.Unlock()
+	if m.locks[key] {
+		return false, nil
+	}
+	m.locks[key] = true
+	return true, nil
+}
+
+func (m *Memory) Unlock(_ context.Context, key string) error {
+	m.locksMu.Lock()
+	defer m.locksMu.Unlock()
+	delete(m.locks, key)
+	return nil
+}
+
+func (m *Memory) Flush(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for k, el := range m.entries {
+		m.lruList.Remove(el)
+		delete(m.entries, k)
+	}
+	return nil
 }
 
 func (m *Memory) promote(e *list.Element) {

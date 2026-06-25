@@ -1,9 +1,13 @@
 package api
 
 import (
+	"log/slog"
 	"net/http"
 	"runtime"
 	"time"
+
+	"github.com/bata94/northstar/config"
+	"github.com/bata94/northstar/node"
 )
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +64,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	writeOK(w, map[string]any{
 		"uptime_sec":      int(time.Since(s.started).Seconds()),
+		"instance_id":     node.InstanceID(),
+		"node_name":       node.NodeName(s.cfg.NodeName),
 		"goroutines":      runtime.NumGoroutine(),
 		"alloc_mb":        m.Alloc / 1024 / 1024,
 		"total_alloc_mb":  m.TotalAlloc / 1024 / 1024,
@@ -68,6 +74,17 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"cache_entries":   s.cache.Len(),
 		"cache_evictions": s.cache.Evictions(),
 	})
+}
+
+func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
+	cfg, err := config.Reload()
+	if err != nil {
+		writeInternalError(w, "config reload", err)
+		return
+	}
+	s.cfg = &cfg
+	slog.Warn("Config reloaded via API endpoint")
+	writeOK(w, map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {

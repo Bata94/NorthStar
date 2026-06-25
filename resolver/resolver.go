@@ -10,9 +10,11 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/bata94/northstar/cache"
@@ -24,12 +26,42 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+var soReusePort = func() int {
+	if runtime.GOOS == "darwin" {
+		return 0x0200
+	}
+	return 0x0F
+}()
+
+func listenConfig(reusePort bool) net.ListenConfig {
+	if !reusePort {
+		return net.ListenConfig{}
+	}
+	return net.ListenConfig{
+		Control: func(network, address string, c syscall.RawConn) error {
+			var opErr error
+			if err := c.Control(func(fd uintptr) {
+				opErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, soReusePort, 1)
+			}); err != nil {
+				return err
+			}
+			return opErr
+		},
+	}
+}
+
 func Serve(ctx context.Context, l config.Listener, group *upstream.Group, c cache.Cache, runtimeCfg *config.RuntimeConfig, m *metrics.Metrics) error {
 	addr := net.UDPAddr{Port: l.Port, IP: net.ParseIP(l.IP)}
-	conn, err := net.ListenUDP("udp", &addr)
+	lc := listenConfig(l.ReusePort)
+	pc, err := lc.ListenPacket(ctx, "udp", addr.String())
 	if err != nil {
 		return err
 	}
+	conn, ok := pc.(*net.UDPConn)
+	if !ok {
+		return fmt.Errorf("unexpected packet conn type")
+	}
+
 	defer func() {
 		if err := conn.Close(); err != nil {
 			slog.Error("Error closing connection", "error", err)
@@ -65,10 +97,16 @@ func Serve(ctx context.Context, l config.Listener, group *upstream.Group, c cach
 
 func ServeTCP(ctx context.Context, l config.Listener, group *upstream.Group, c cache.Cache, runtimeCfg *config.RuntimeConfig, m *metrics.Metrics, maxTCPConns int) error {
 	addr := net.TCPAddr{Port: l.Port, IP: net.ParseIP(l.IP)}
-	listener, err := net.ListenTCP("tcp", &addr)
+	lc := listenConfig(l.ReusePort)
+	tcpListener, err := lc.Listen(ctx, "tcp", addr.String())
 	if err != nil {
 		return err
 	}
+	listener, ok := tcpListener.(*net.TCPListener)
+	if !ok {
+		return fmt.Errorf("unexpected tcp listener type")
+	}
+
 	defer func() {
 		if err := listener.Close(); err != nil {
 			slog.Error("Error closing TCP listener", "error", err)
@@ -660,7 +698,20 @@ func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.G
 					call := &inflightCall{done: make(chan struct{})}
 					inflightCalls[ikey] = call
 					inflightMu.Unlock()
-					go refreshCache(call, ikey, domain, qtype, c, maxPayload, network, group, do, m, ttlMin, ttlMax, negativeTTL, ecsData)
+
+					staleLockKey := fmt.Sprintf("northstar:inflight:stale:%s:%d", domain, qtype)
+					locked, lErr := c.TryLock(ctx, staleLockKey, 5*time.Second)
+					if lErr == nil && locked {
+						go refreshCache(call, ikey, domain, qtype, c, maxPayload, network, group, do, m, ttlMin, ttlMax, negativeTTL, ecsData)
+					} else {
+						if lErr != nil {
+							slog.Error("Stale refresh lock error", "error", lErr)
+						}
+						inflightMu.Lock()
+						delete(inflightCalls, ikey)
+						inflightMu.Unlock()
+						call.once.Do(func() { close(call.done) })
+					}
 				} else {
 					inflightMu.Unlock()
 				}
@@ -668,6 +719,9 @@ func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.G
 			}
 		}
 	}
+
+	lockKey := fmt.Sprintf("northstar:inflight:%s:%d", domain, qtype)
+	usingDistributedLock := false
 
 	ikey := inflightKey{domain, qtype}
 	inflightMu.Lock()
@@ -693,30 +747,60 @@ func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.G
 
 	defer func() {
 		call.once.Do(func() { close(call.done) })
+		if usingDistributedLock {
+			if err := c.Unlock(ctx, lockKey); err != nil {
+				slog.Error("Failed to release distributed lock", "key", lockKey, "error", err)
+			}
+		}
 		inflightMu.Lock()
 		delete(inflightCalls, ikey)
 		inflightMu.Unlock()
 	}()
 
-	var err error
-	var upstreams []*upstream.Upstream
+	locked, err := c.TryLock(ctx, lockKey, 10*time.Second)
+	if err != nil {
+		slog.Error("Distributed lock error, falling back to direct fetch", "key", lockKey, "error", err)
+	} else if !locked {
+		slog.Debug("Another node is fetching, polling cache", "domain", domain, "type", qtype)
+		pollStart := time.Now()
+		for time.Since(pollStart) < 5*time.Second {
+			select {
+			case <-ctx.Done():
+				return nil, "", ctx.Err()
+			default:
+			}
+			time.Sleep(50 * time.Millisecond)
+			if entry, found := c.Peek(ctx, domain, qtype); found && !entry.Expired() {
+				slog.Debug("Poll succeeded, another node cached the entry", "domain", domain, "type", qtype)
+				m.CacheHits.Inc()
+				entry.RecordHit()
+				call.entry = entry
+				return entry, "", nil
+			}
+		}
+		slog.Debug("Poll timed out, fetching directly", "domain", domain, "type", qtype)
+	} else {
+		usingDistributedLock = true
+	}
+
+	var selectedUpstreams []*upstream.Upstream
 	if preferredUpstream != "" {
 		if u := group.GetByName(preferredUpstream); u != nil && u.IsHealthy() {
-			upstreams = []*upstream.Upstream{u}
+			selectedUpstreams = []*upstream.Upstream{u}
 		}
 	}
-	if len(upstreams) == 0 {
-		upstreams = group.SelectN(ctx, domain, group.Concurrency)
+	if len(selectedUpstreams) == 0 {
+		selectedUpstreams = group.SelectN(ctx, domain, group.Concurrency)
 	}
-	if len(upstreams) == 0 {
+	if len(selectedUpstreams) == 0 {
 		err = fmt.Errorf("no healthy upstream available")
 		call.err = err
 		return nil, "", err
 	}
 
 	var upstreamName string
-	if len(upstreams) == 1 {
-		u := upstreams[0]
+	if len(selectedUpstreams) == 1 {
+		u := selectedUpstreams[0]
 		entry, err = fetchFromUpstream(ctx, domain, qtype, maxPayload, network, u, do, m, ttlMin, ttlMax, negativeTTL, ecsData)
 		if err != nil {
 			u.ReportFailure()
@@ -726,7 +810,7 @@ func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.G
 		}
 		upstreamName = u.Name
 	} else {
-		entry, upstreamName, err = raceUpstreams(ctx, domain, qtype, maxPayload, network, upstreams, group, do, m, ttlMin, ttlMax, negativeTTL, ecsData)
+		entry, upstreamName, err = raceUpstreams(ctx, domain, qtype, maxPayload, network, selectedUpstreams, group, do, m, ttlMin, ttlMax, negativeTTL, ecsData)
 		if err != nil {
 			call.err = err
 			return nil, "", err

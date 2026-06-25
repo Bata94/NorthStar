@@ -182,6 +182,8 @@ type FileACLConfig struct {
 
 type FileConfig struct {
 	Mode                 *string                      `yaml:"mode"`
+	NodeName             *string                      `yaml:"node_name"`
+	NodeID               *string                      `yaml:"node_id"`
 	DNSPort              *int                         `yaml:"dns_port"`
 	UpstreamAddr         *string                      `yaml:"upstream"`
 	Upstreams            []FileUpstreamConfig         `yaml:"upstreams"`
@@ -224,6 +226,9 @@ type FileConfig struct {
 	EcsPrefixV6          *int                         `yaml:"ecs_prefix_v6"`
 	TLS                  *FileTLSConfig               `yaml:"tls"`
 	Zones                []FileZoneConfig             `yaml:"zones,omitempty"`
+	ReusePort            *bool                        `yaml:"reuse_port"`
+	ReusePortWorkers     *int                         `yaml:"reuse_port_workers"`
+	RateLimitFailClose   *bool                        `yaml:"rate_limit_fail_close"`
 	ACLs                 []FileACLConfig              `yaml:"acls,omitempty"`
 	Hooks                *FileHookConfig              `yaml:"hooks"`
 }
@@ -293,6 +298,12 @@ func fileUpstreamToConfig(src *FileUpstreamConfig) UpstreamConfig {
 func applyFileConfig(cfg *Config, fc *FileConfig) {
 	if fc.Mode != nil {
 		cfg.Mode = *fc.Mode
+	}
+	if fc.NodeName != nil {
+		cfg.NodeName = *fc.NodeName
+	}
+	if fc.NodeID != nil {
+		cfg.NodeID = *fc.NodeID
 	}
 	if fc.DNSPort != nil {
 		cfg.DNSPort = *fc.DNSPort
@@ -383,6 +394,15 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 	}
 	if fc.DebugEnable != nil {
 		cfg.DebugEnable = *fc.DebugEnable
+	}
+	if fc.ReusePort != nil {
+		cfg.ReusePort = *fc.ReusePort
+	}
+	if fc.ReusePortWorkers != nil {
+		cfg.ReusePortWorkers = *fc.ReusePortWorkers
+	}
+	if fc.RateLimitFailClose != nil {
+		cfg.RateLimitFailClose = *fc.RateLimitFailClose
 	}
 	if fc.MetricsEnable != nil {
 		cfg.MetricsEnable = *fc.MetricsEnable
@@ -659,6 +679,9 @@ func configToFile(cfg *Config) *FileConfig {
 	timeZone := cfg.TimeZone
 	maxTCPConnsPerClient := cfg.MaxTCPConnsPerClient
 	debugEnable := cfg.DebugEnable
+	rateLimitFailClose := cfg.RateLimitFailClose
+	reusePort := cfg.ReusePort
+	reusePortWorkers := cfg.ReusePortWorkers
 	metricsEnable := cfg.MetricsEnable
 	metricsPort := cfg.MetricsPort
 	apiEnable := cfg.APIEnable
@@ -810,6 +833,8 @@ func configToFile(cfg *Config) *FileConfig {
 
 	return &FileConfig{
 		Mode:                &mode,
+		NodeName:            &cfg.NodeName,
+		NodeID:              &cfg.NodeID,
 		DNSPort:             &dnsPort,
 		UpstreamAddr:        &upstream,
 		Upstreams:           fileUpstreams,
@@ -836,6 +861,9 @@ func configToFile(cfg *Config) *FileConfig {
 		RateLimit:            &rateLimit,
 		StaleAge:             &staleAge,
 		NegativeTTL:          &negativeTTL,
+		RateLimitFailClose:   &rateLimitFailClose,
+		ReusePort:            &reusePort,
+		ReusePortWorkers:     &reusePortWorkers,
 		CacheWarmup:          &cacheWarmup,
 		CacheMaxEntries:      &cacheMaxEntries,
 		TTLMin:               &ttlMin,
@@ -1059,6 +1087,9 @@ func WriteDefaultConfig(path string) error {
 	timeZone := ""
 	maxTCPConnsPerClient := 0
 	debugEnable := false
+	rateLimitFailClose := false
+	reusePort := true
+	reusePortWorkers := 0
 	metricsEnable := false
 	metricsPort := 9153
 	apiEnable := false
@@ -1116,8 +1147,13 @@ func WriteDefaultConfig(path string) error {
 	weight := 1
 	adaptiveFactor := 0.0
 
+	nodeName := ""
+	nodeID := ""
+
 	fc := FileConfig{
 		Mode:         &mode,
+		NodeName:     &nodeName,
+		NodeID:       &nodeID,
 		DNSPort:      &dnsPort,
 		UpstreamAddr: &upstream,
 		Upstreams: []FileUpstreamConfig{{
@@ -1158,6 +1194,9 @@ func WriteDefaultConfig(path string) error {
 		RateLimit:            &rateLimit,
 		StaleAge:             &staleAge,
 		NegativeTTL:          &negativeTTL,
+		RateLimitFailClose:   &rateLimitFailClose,
+		ReusePort:            &reusePort,
+		ReusePortWorkers:     &reusePortWorkers,
 		CacheWarmup:          &cacheWarmup,
 		CacheMaxEntries:      &cacheMaxEntries,
 		TTLMin:               &ttlMin,

@@ -123,6 +123,8 @@ func (s *Server) Serve(ctx context.Context) error {
 	mux.HandleFunc("PUT /api/v1/acls/{name}", s.auth(s.handleACLUpdate))
 	mux.HandleFunc("DELETE /api/v1/acls/{name}", s.auth(s.handleACLDelete))
 
+	mux.HandleFunc("POST /api/v1/reload", s.auth(s.handleReload))
+
 	addr := fmt.Sprintf(":%d", s.cfg.APIPort)
 	s.http = &http.Server{Addr: addr, Handler: mux}
 

@@ -19,6 +19,7 @@ import (
 	"github.com/bata94/northstar/hooks"
 	"github.com/bata94/northstar/log"
 	"github.com/bata94/northstar/metrics"
+	"github.com/bata94/northstar/node"
 	"github.com/bata94/northstar/resolver"
 	"github.com/bata94/northstar/tls"
 	"github.com/bata94/northstar/upstream"
@@ -65,7 +66,7 @@ func main() {
 		}
 	}
 	slog.SetDefault(log.New(logLevel, logMode, cfg.LogDir, cfg.LogRetention))
-	slog.Warn("starting northstar", "version", Version)
+	slog.Warn("starting northstar", "version", Version, "instance_id", node.InstanceID(), "node_name", node.NodeName(cfg.NodeName))
 
 	m := metrics.New()
 
@@ -205,20 +206,28 @@ func main() {
 		}
 	}
 
-	errCap := len(cfg.Listeners)
+	workers := cfg.ReusePortWorkers
+	if workers < 1 {
+		workers = 1
+	}
+	errCap := len(cfg.Listeners) * workers
 	if !cfg.TcpDisable {
 		errCap *= 2
 	}
 	errChan := make(chan error, errCap)
 	for _, l := range cfg.Listeners {
 		l := l
-		go func() {
-			errChan <- resolver.Serve(ctx, l, upstreamGroup, backend, runtimeCfg, m)
-		}()
-		if !cfg.TcpDisable {
+		for range workers {
 			go func() {
-				errChan <- resolver.ServeTCP(ctx, l, upstreamGroup, backend, runtimeCfg, m, cfg.MaxTCPConnsPerClient)
+				errChan <- resolver.Serve(ctx, l, upstreamGroup, backend, runtimeCfg, m)
 			}()
+		}
+		if !cfg.TcpDisable {
+			for range workers {
+				go func() {
+					errChan <- resolver.ServeTCP(ctx, l, upstreamGroup, backend, runtimeCfg, m, cfg.MaxTCPConnsPerClient)
+				}()
+			}
 		}
 	}
 
@@ -309,6 +318,7 @@ func buildHooksWithBlocking(cfg *config.Config, c cache.Cache, m *metrics.Metric
 		rateCfg.Action,
 		rateCfg.Priority,
 		rateCfg.Enabled,
+		cfg.RateLimitFailClose,
 	))
 
 	blockCfg := cfg.Hooks.Blocking
