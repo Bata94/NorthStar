@@ -43,7 +43,11 @@ func (h *RateLimitHook) Handle(ctx *Context) error {
 	if val > int64(h.Rate) {
 		slog.Warn("Rate limit exceeded", "client", ctx.ClientIP, "qps", h.Rate)
 		ctx.Metrics.ErrorsTotal.With(prometheus.Labels{"type": "rate_limited"}).Inc()
-		sendServfail(ctx.Request, ctx.Send)
+		switch h.Action {
+		case "drop":
+		default:
+			sendServfail(ctx.Request, ctx.Send)
+		}
 		return ErrRateLimited
 	}
 	return nil

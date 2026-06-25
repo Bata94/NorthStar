@@ -4,8 +4,11 @@
 package cache
 
 import (
+	"container/list"
 	"context"
+	"encoding/binary"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bata94/northstar/dns"
@@ -28,6 +31,24 @@ type Entry struct {
 	Authorities   []dns.ResourceRecord
 	Additionals   []dns.ResourceRecord
 	ExpiresAt     time.Time
+	HitCount      atomic.Int64
+	lastHitAt     atomic.Value
+}
+
+func (e *Entry) LastHitAt() time.Time {
+	if v := e.lastHitAt.Load(); v != nil {
+		return v.(time.Time)
+	}
+	return time.Time{}
+}
+
+func (e *Entry) SetLastHitAt(t time.Time) {
+	e.lastHitAt.Store(t)
+}
+
+func (e *Entry) RecordHit() {
+	e.HitCount.Add(1)
+	e.SetLastHitAt(time.Now())
 }
 
 type Cache interface {
@@ -35,12 +56,31 @@ type Cache interface {
 	Peek(ctx context.Context, domain string, qtype uint16) (*Entry, bool)
 	Set(ctx context.Context, entry *Entry) error
 	Incr(ctx context.Context, key string, ttl time.Duration) (int64, error)
+	Warmup(ctx context.Context, dest Cache) error
 	Close()
 }
 
-func NewEntry(domain string, qtype uint16, answers, authorities, additionals []dns.ResourceRecord) *Entry {
+func negativeTTLFromSOA(authorities []dns.ResourceRecord, negativeTTL int) uint32 {
+	if negativeTTL > 0 {
+		return uint32(negativeTTL)
+	}
+	for _, rr := range authorities {
+		if rr.Type == 6 && len(rr.RData) >= 20 {
+			min := binary.BigEndian.Uint32(rr.RData[len(rr.RData)-4:])
+			if min > 0 {
+				return min
+			}
+		}
+	}
+	return 300
+}
+
+func NewEntry(domain string, qtype uint16, rcode uint16, answers, authorities, additionals []dns.ResourceRecord, ttlMin, ttlMax, negativeTTL int) *Entry {
 	ttl := uint32(defaultTTL)
-	if len(answers) > 0 {
+	isNegative := rcode == 3 || (rcode == 0 && len(answers) == 0)
+	if isNegative {
+		ttl = negativeTTLFromSOA(authorities, negativeTTL)
+	} else if len(answers) > 0 {
 		matched := false
 		for _, rr := range answers {
 			if rr.Type == qtype {
@@ -70,8 +110,14 @@ func NewEntry(domain string, qtype uint16, answers, authorities, additionals []d
 	if ttl == 0 {
 		ttl = defaultTTL
 	}
+	if ttlMin > 0 && ttl < uint32(ttlMin) {
+		ttl = uint32(ttlMin)
+	}
+	if ttlMax > 0 && ttl > uint32(ttlMax) {
+		ttl = uint32(ttlMax)
+	}
 
-	return &Entry{
+	e := &Entry{
 		Domain:      domain,
 		QType:       qtype,
 		Answers:     answers,
@@ -79,6 +125,8 @@ func NewEntry(domain string, qtype uint16, answers, authorities, additionals []d
 		Additionals: additionals,
 		ExpiresAt:   time.Now().Add(time.Duration(ttl) * time.Second),
 	}
+	e.HitCount.Store(0)
+	return e
 }
 
 func (e *Entry) Expired() bool {
@@ -110,21 +158,30 @@ type counterEntry struct {
 }
 
 type Memory struct {
-	entries    map[cacheKey]*Entry
-	mu         sync.RWMutex
+	entries    map[cacheKey]*list.Element
+	lruList    *list.List
+	maxEntries int
+	mu         sync.Mutex
 	counters   map[string]*counterEntry
 	countersMu sync.Mutex
 	stopCh     chan struct{}
+	evictions  atomic.Int64
 }
 
-func NewMemory() *Memory {
+func NewMemory(maxEntries int) *Memory {
 	m := &Memory{
-		entries:  make(map[cacheKey]*Entry),
-		counters: make(map[string]*counterEntry),
-		stopCh:   make(chan struct{}),
+		entries:    make(map[cacheKey]*list.Element),
+		lruList:    list.New(),
+		maxEntries: maxEntries,
+		counters:   make(map[string]*counterEntry),
+		stopCh:     make(chan struct{}),
 	}
 	go m.evictLoop()
 	return m
+}
+
+func (m *Memory) Evictions() int64 {
+	return m.evictions.Load()
 }
 
 func (m *Memory) evictLoop() {
@@ -134,9 +191,11 @@ func (m *Memory) evictLoop() {
 		select {
 		case <-ticker.C:
 			m.mu.Lock()
-			for k, e := range m.entries {
-				if e.Expired() {
-					delete(m.entries, k)
+			for e := m.lruList.Back(); e != nil; e = e.Prev() {
+				entry := e.Value.(*Entry)
+				if entry.Expired() {
+					delete(m.entries, cacheKey{entry.Domain, entry.QType})
+					m.lruList.Remove(e)
 				}
 			}
 			m.mu.Unlock()
@@ -155,28 +214,73 @@ func (m *Memory) evictLoop() {
 	}
 }
 
+func (m *Memory) evictOne() {
+	if m.maxEntries <= 0 || m.lruList.Len() < m.maxEntries {
+		return
+	}
+	for e := m.lruList.Back(); e != nil; e = e.Prev() {
+		entry := e.Value.(*Entry)
+		if entry.Expired() {
+			delete(m.entries, cacheKey{entry.Domain, entry.QType})
+			m.lruList.Remove(e)
+			return
+		}
+	}
+	e := m.lruList.Back()
+	if e != nil {
+		entry := e.Value.(*Entry)
+		delete(m.entries, cacheKey{entry.Domain, entry.QType})
+		m.lruList.Remove(e)
+		m.evictions.Add(1)
+	}
+}
+
+func (m *Memory) promote(e *list.Element) {
+	m.lruList.MoveToFront(e)
+}
+
 func (m *Memory) Get(_ context.Context, domain string, qtype uint16) (*Entry, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	entry, ok := m.entries[cacheKey{domain, qtype}]
-	if ok && entry.Expired() {
-		delete(m.entries, cacheKey{domain, qtype})
+	el, ok := m.entries[cacheKey{domain, qtype}]
+	if !ok {
 		return nil, false
 	}
-	return entry, ok
+	entry := el.Value.(*Entry)
+	if entry.Expired() {
+		delete(m.entries, cacheKey{domain, qtype})
+		m.lruList.Remove(el)
+		return nil, false
+	}
+	m.promote(el)
+	return entry, true
 }
 
 func (m *Memory) Peek(_ context.Context, domain string, qtype uint16) (*Entry, bool) {
-	m.mu.RLock()
-	entry, ok := m.entries[cacheKey{domain, qtype}]
-	m.mu.RUnlock()
-	return entry, ok
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	el, ok := m.entries[cacheKey{domain, qtype}]
+	if !ok {
+		return nil, false
+	}
+	m.promote(el)
+	return el.Value.(*Entry), true
 }
 
 func (m *Memory) Set(_ context.Context, entry *Entry) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.entries[cacheKey{entry.Domain, entry.QType}] = entry
+	key := cacheKey{entry.Domain, entry.QType}
+	if el, ok := m.entries[key]; ok {
+		m.lruList.Remove(el)
+	}
+	m.evictOne()
+	el := m.lruList.PushFront(entry)
+	m.entries[key] = el
+	return nil
+}
+
+func (m *Memory) Warmup(_ context.Context, _ Cache) error {
 	return nil
 }
 

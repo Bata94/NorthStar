@@ -13,19 +13,19 @@
 
 ## Caching
 
-- Cache hit counter + last-hit timestamp — track per-entry access
+- [X] Cache hit counter + last-hit timestamp — track per-entry access
   patterns for smarter eviction
-- Limit cache size by entry count — evict oldest + least-used entries
+- [X] Limit cache size by entry count — evict oldest + least-used entries
   when capacity is reached
-- Keep top entries warm / Adaptive prefetch — proactively refresh
+- [ ] Keep top entries warm / Adaptive prefetch — proactively refresh
   popular entries before they expire (configurable popularity threshold
   and prefetch window)
-- TTL Overwrite — global min/max TTL override to reduce upstream
+- [X] TTL Overwrite — global min/max TTL override to reduce upstream
   queries (e.g., floor at 30s, cap at 1h)
-- Negative caching (RFC 2308) — cache NXDOMAIN and NODATA responses
+- [X] Negative caching (RFC 2308) — cache NXDOMAIN and NODATA responses
   with separate (typically shorter) TTLs; currently only successful
   responses are cached
-- Cache warming on startup — reload popular entries from Valkey or
+- [X] Cache warming on startup — reload popular entries from Valkey or
   bbolt on restart to avoid a cold-cache storm
 
 ## Upstream Management
@@ -62,11 +62,11 @@
 
 ## Low RAM Mode
 
-- File-based cache backend (bbolt) — on-disk storage, minimal memory
+- [X] File-based cache backend (bbolt) — on-disk storage, minimal memory
   footprint
-- Environment variable toggle — `NORTHSTAR_CACHE_FILE` to enable;
+- [X] Environment variable toggle — `NORTHSTAR_CACHE_FILE` to enable;
   falls back to current memory/Valkey logic when unset
-- Periodic expiry compaction — bbolt auto-compaction to reclaim space
+- [X] Periodic expiry compaction — bbolt auto-compaction to reclaim space
 
 ## Configuration & API
 
@@ -118,9 +118,9 @@
     client subnet)
   - ACL-based protocol restrictions (e.g., only allow
     certain subnets to use TCP)
-- TCP connection limits per client — separate from query rate
+- [X] TCP connection limits per client — separate from query rate
   limiting; prevents TCP resource exhaustion
-- Configurable action for rate-limited queries — SERVFAIL vs
+- [X] Configurable action for rate-limited queries — SERVFAIL vs
   silent drop (currently hardcoded to SERVFAIL)
 
 ## Observability
@@ -185,14 +185,14 @@ path before piling on features.
 **Goal:** Production-grade caching — prevent unbounded memory growth,
 cache negative answers, give operators TTL control.
 
-- [ ] Negative caching (RFC 2308) — NXDOMAIN and NODATA
-- [ ] Cache size limits by entry count with LRU eviction
-- [ ] Cache hit counter + last-hit timestamp
-- [ ] TTL Overwrite (configurable min/max)
-- [ ] TCP connection limits per client
-- [ ] Configurable action for rate-limited queries (SERVFAIL / drop)
-- [ ] bbolt file-based cache backend (Low RAM Mode)
-- [ ] Cache warming on startup (from Valkey or bbolt)
+- [X] Negative caching (RFC 2308) — NXDOMAIN and NODATA
+- [X] Cache size limits by entry count with LRU eviction
+- [X] Cache hit counter + last-hit timestamp
+- [X] TTL Overwrite (configurable min/max)
+- [X] TCP connection limits per client
+- [X] Configurable action for rate-limited queries (SERVFAIL / drop)
+- [X] bbolt file-based cache backend (Low RAM Mode)
+- [X] Cache warming on startup (from Valkey or bbolt)
 
 **Depends on:** Phase 1 (hooks for rate-limit action config)
 

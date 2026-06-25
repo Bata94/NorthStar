@@ -63,19 +63,45 @@ func main() {
 	slog.Warn("starting northstar", "version", Version)
 
 	var backend cache.Cache
-	if cfg.CacheAddr != "" {
+	switch {
+	case cfg.CacheAddr != "" && cfg.CacheFile != "":
+		slog.Warn("Both CacheAddr and CacheFile set, using Valkey")
+		fallthrough
+	case cfg.CacheAddr != "":
 		b, err := cache.NewValkey(cfg.CacheAddr, cfg.StaleAge)
 		if err != nil {
 			slog.Error("Valkey unreachable, using in-memory cache", "error", err)
-			backend = cache.NewMemory()
+			backend = cache.NewMemory(cfg.CacheMaxEntries)
 		} else {
 			slog.Info("Using Valkey cache", "addr", cfg.CacheAddr)
 			backend = b
 		}
-	} else {
-		backend = cache.NewMemory()
+	case cfg.CacheFile != "":
+		b, err := cache.NewBbolt(cfg.CacheFile, cfg.StaleAge)
+		if err != nil {
+			slog.Error("Bbolt cache open failed, using in-memory cache", "error", err)
+			backend = cache.NewMemory(cfg.CacheMaxEntries)
+		} else {
+			slog.Info("Using bbolt cache", "file", cfg.CacheFile)
+			backend = b
+		}
+	default:
+		backend = cache.NewMemory(cfg.CacheMaxEntries)
 	}
 	defer backend.Close()
+
+	if cfg.CacheWarmup {
+		warmupCtx, warmupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		go func() {
+			defer warmupCancel()
+			slog.Info("Starting cache warmup...")
+			if err := backend.Warmup(warmupCtx, backend); err != nil {
+				slog.Error("Cache warmup failed", "error", err)
+			} else {
+				slog.Info("Cache warmup completed")
+			}
+		}()
+	}
 
 	m := metrics.New()
 
@@ -123,11 +149,11 @@ func main() {
 	for _, l := range cfg.Listeners {
 		l := l
 		go func() {
-			errChan <- resolver.Serve(ctx, l, cfg.UpstreamAddr, backend, cfg.StaleAge, udpPool, m)
+			errChan <- resolver.Serve(ctx, l, cfg.UpstreamAddr, backend, runtimeCfg, udpPool, m)
 		}()
 		if !cfg.TcpDisable {
 			go func() {
-				errChan <- resolver.ServeTCP(ctx, l, cfg.UpstreamAddr, backend, cfg.StaleAge, tcpPool, m)
+				errChan <- resolver.ServeTCP(ctx, l, cfg.UpstreamAddr, backend, runtimeCfg, tcpPool, m, cfg.MaxTCPConnsPerClient)
 			}()
 		}
 	}

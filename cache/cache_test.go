@@ -34,8 +34,11 @@ func makeSOA(ttl uint32) dns.ResourceRecord {
 	rdata := []byte{
 		2, 'n', 's', 0,
 		2, 'a', 'd', 0,
-		0, 0, 0, 0x3C, 0, 0, 0x0E, 0x10,
-		0, 0x00, 0x09, 0x3A, 0x80, 0, 0x00, 0x01, 0x51, 0x80,
+		0, 0, 0, 0x3C,
+		0, 0, 0x0E, 0x10,
+		0, 0x00, 0x09, 0x3A,
+		0x80, 0, 0x00, 0x01,
+		0, 0, 0, 0x78,
 	}
 	return dns.ResourceRecord{
 		Name: "example.com", Type: 6, Class: 1, TTL: ttl,
@@ -44,11 +47,11 @@ func makeSOA(ttl uint32) dns.ResourceRecord {
 }
 
 func TestNewEntryTTLFromMatchingType(t *testing.T) {
-	entry := NewEntry("example.com", 1,
+	entry := NewEntry("example.com", 1, 0,
 		[]dns.ResourceRecord{
 			makeA("example.com", 300, "1.2.3.4"),
 			makeA("example.com", 600, "5.6.7.8"),
-		}, nil, nil)
+		}, nil, nil, 0, 0, 0)
 	remaining := time.Until(entry.ExpiresAt)
 	if remaining < 299*time.Second || remaining > 301*time.Second {
 		t.Errorf("expected TTL ~300s (min of A records), got %v", remaining)
@@ -56,17 +59,17 @@ func TestNewEntryTTLFromMatchingType(t *testing.T) {
 }
 
 func TestNewEntryDefaultTTLFallback(t *testing.T) {
-	entry := NewEntry("example.com", 1, nil, nil, nil)
+	entry := NewEntry("example.com", 1, 0, nil, nil, nil, 0, 0, 0)
 	remaining := time.Until(entry.ExpiresAt)
-	if remaining < 3599*time.Second || remaining > 3601*time.Second {
-		t.Errorf("expected TTL ~3600s (defaultTTL), got %v", remaining)
+	if remaining < 299*time.Second || remaining > 301*time.Second {
+		t.Errorf("expected TTL ~300s (negative TTL default), got %v", remaining)
 	}
 }
 
 func TestNewEntryEmptyAnswersSoaFallback(t *testing.T) {
 	soa := makeSOA(120)
-	entry := NewEntry("example.com", 1, nil,
-		[]dns.ResourceRecord{soa}, nil)
+	entry := NewEntry("example.com", 1, 0, nil,
+		[]dns.ResourceRecord{soa}, nil, 0, 0, 0)
 	remaining := time.Until(entry.ExpiresAt)
 	if remaining < 119*time.Second || remaining > 121*time.Second {
 		t.Errorf("expected TTL ~120s (from SOA), got %v", remaining)
@@ -74,11 +77,11 @@ func TestNewEntryEmptyAnswersSoaFallback(t *testing.T) {
 }
 
 func TestNewEntryMixedTTLCNAMEAndA(t *testing.T) {
-	entry := NewEntry("www.example.com", 1,
+	entry := NewEntry("www.example.com", 1, 0,
 		[]dns.ResourceRecord{
 			makeCNAME("www.example.com", "example.com", 1200),
 			makeA("example.com", 300, "1.2.3.4"),
-		}, nil, nil)
+		}, nil, nil, 0, 0, 0)
 	remaining := time.Until(entry.ExpiresAt)
 	if remaining < 299*time.Second || remaining > 301*time.Second {
 		t.Errorf("expected TTL ~300s (from A record matching qtype=1), got %v", remaining)
@@ -86,10 +89,10 @@ func TestNewEntryMixedTTLCNAMEAndA(t *testing.T) {
 }
 
 func TestNewEntryNoMatchingType(t *testing.T) {
-	entry := NewEntry("example.com", 1,
+	entry := NewEntry("example.com", 1, 0,
 		[]dns.ResourceRecord{
 			{Name: "example.com", Type: 5, Class: 1, TTL: 100},
-		}, nil, nil)
+		}, nil, nil, 0, 0, 0)
 	remaining := time.Until(entry.ExpiresAt)
 	if remaining < 3599*time.Second || remaining > 3601*time.Second {
 		t.Errorf("expected TTL ~3600s (defaultTTL, no matching type), got %v", remaining)
@@ -97,10 +100,10 @@ func TestNewEntryNoMatchingType(t *testing.T) {
 }
 
 func TestNewEntryZeroTTL(t *testing.T) {
-	entry := NewEntry("example.com", 1,
+	entry := NewEntry("example.com", 1, 0,
 		[]dns.ResourceRecord{
 			makeA("example.com", 0, "1.2.3.4"),
-		}, nil, nil)
+		}, nil, nil, 0, 0, 0)
 	remaining := time.Until(entry.ExpiresAt)
 	if remaining < 3599*time.Second || remaining > 3601*time.Second {
 		t.Errorf("expected TTL ~3600s (defaultTTL for zero TTL), got %v", remaining)
@@ -157,12 +160,12 @@ func TestCopyRecordsFloorOneSecond(t *testing.T) {
 }
 
 func TestMemoryGetSet(t *testing.T) {
-	m := NewMemory()
+	m := NewMemory(0)
 	defer m.Close()
 
 	ctx := context.Background()
-	e := NewEntry("example.com", 1,
-		[]dns.ResourceRecord{makeA("example.com", 300, "1.2.3.4")}, nil, nil)
+	e := NewEntry("example.com", 1, 0,
+		[]dns.ResourceRecord{makeA("example.com", 300, "1.2.3.4")}, nil, nil, 0, 0, 0)
 	_ = m.Set(ctx, e)
 
 	got, ok := m.Get(ctx, "example.com", 1)
@@ -178,7 +181,7 @@ func TestMemoryGetSet(t *testing.T) {
 }
 
 func TestMemoryGetMiss(t *testing.T) {
-	m := NewMemory()
+	m := NewMemory(0)
 	defer m.Close()
 	_, ok := m.Get(context.Background(), "nonexistent", 1)
 	if ok {
@@ -187,12 +190,12 @@ func TestMemoryGetMiss(t *testing.T) {
 }
 
 func TestMemoryPeek(t *testing.T) {
-	m := NewMemory()
+	m := NewMemory(0)
 	defer m.Close()
 
 	ctx := context.Background()
-	e := NewEntry("example.com", 1,
-		[]dns.ResourceRecord{makeA("example.com", 300, "1.2.3.4")}, nil, nil)
+	e := NewEntry("example.com", 1, 0,
+		[]dns.ResourceRecord{makeA("example.com", 300, "1.2.3.4")}, nil, nil, 0, 0, 0)
 	_ = m.Set(ctx, e)
 
 	got, ok := m.Peek(ctx, "example.com", 1)
@@ -205,7 +208,7 @@ func TestMemoryPeek(t *testing.T) {
 }
 
 func TestMemoryPeekExpired(t *testing.T) {
-	m := NewMemory()
+	m := NewMemory(0)
 	defer m.Close() //nolint:errcheck
 
 	ctx := context.Background()
@@ -225,7 +228,7 @@ func TestMemoryPeekExpired(t *testing.T) {
 }
 
 func TestMemoryGetDeletesExpired(t *testing.T) {
-	m := NewMemory()
+	m := NewMemory(0)
 	defer m.Close() //nolint:errcheck
 
 	ctx := context.Background()
@@ -247,7 +250,7 @@ func TestMemoryGetDeletesExpired(t *testing.T) {
 }
 
 func TestMemoryIncr(t *testing.T) {
-	m := NewMemory()
+	m := NewMemory(0)
 	defer m.Close() //nolint:errcheck
 
 	ctx := context.Background()
@@ -269,7 +272,7 @@ func TestMemoryIncr(t *testing.T) {
 }
 
 func TestMemoryIncrExpiry(t *testing.T) {
-	m := NewMemory()
+	m := NewMemory(0)
 	defer m.Close() //nolint:errcheck
 
 	ctx := context.Background()
@@ -285,7 +288,7 @@ func TestMemoryIncrExpiry(t *testing.T) {
 }
 
 func TestMemoryConcurrentAccess(t *testing.T) {
-	m := NewMemory()
+	m := NewMemory(0)
 	defer m.Close() //nolint:errcheck
 
 	ctx := context.Background()
@@ -295,7 +298,7 @@ func TestMemoryConcurrentAccess(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			domain := "test.example"
-			e := NewEntry(domain, 1, []dns.ResourceRecord{makeA(domain, 300, "1.2.3.4")}, nil, nil)
+			e := NewEntry(domain, 1, 0, []dns.ResourceRecord{makeA(domain, 300, "1.2.3.4")}, nil, nil, 0, 0, 0)
 			_ = m.Set(ctx, e)
 			m.Get(ctx, domain, 1)
 			_, _ = m.Incr(ctx, "concurrent:key", time.Minute)
@@ -305,7 +308,7 @@ func TestMemoryConcurrentAccess(t *testing.T) {
 }
 
 func TestMemoryLazyEviction(t *testing.T) {
-	m := NewMemory()
+	m := NewMemory(0)
 	defer m.Close() //nolint:errcheck
 
 	ctx := context.Background()

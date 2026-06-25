@@ -23,7 +23,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-func Serve(ctx context.Context, l config.Listener, upstream string, c cache.Cache, staleAge int, pool *Pool, m *metrics.Metrics) error {
+func Serve(ctx context.Context, l config.Listener, upstream string, c cache.Cache, runtimeCfg *config.RuntimeConfig, pool *Pool, m *metrics.Metrics) error {
 	addr := net.UDPAddr{Port: l.Port, IP: net.ParseIP(l.IP)}
 	conn, err := net.ListenUDP("udp", &addr)
 	if err != nil {
@@ -54,7 +54,7 @@ func Serve(ctx context.Context, l config.Listener, upstream string, c cache.Cach
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			handleRequest(ctx, data, remoteAddr, conn, upstream, c, staleAge, pool, m)
+			handleRequest(ctx, data, remoteAddr, conn, upstream, c, runtimeCfg, pool, m)
 		}()
 		return nil
 	}
@@ -62,7 +62,7 @@ func Serve(ctx context.Context, l config.Listener, upstream string, c cache.Cach
 	return serveLoop(ctx, iteration, "Draining in-flight requests...", "Drain timeout, forcing shutdown")
 }
 
-func ServeTCP(ctx context.Context, l config.Listener, upstream string, c cache.Cache, staleAge int, pool *Pool, m *metrics.Metrics) error {
+func ServeTCP(ctx context.Context, l config.Listener, upstream string, c cache.Cache, runtimeCfg *config.RuntimeConfig, pool *Pool, m *metrics.Metrics, maxTCPConns int) error {
 	addr := net.TCPAddr{Port: l.Port, IP: net.ParseIP(l.IP)}
 	listener, err := net.ListenTCP("tcp", &addr)
 	if err != nil {
@@ -87,10 +87,23 @@ func ServeTCP(ctx context.Context, l config.Listener, upstream string, c cache.C
 			return err
 		}
 
+		clientIP := tcpConn.RemoteAddr().String()
+		if host, _, err := net.SplitHostPort(clientIP); err == nil {
+			clientIP = host
+		}
+
+		if maxTCPConns > 0 && tcpTracker.inc(clientIP) > int64(maxTCPConns) {
+			tcpTracker.dec(clientIP)
+			slog.Warn("TCP connection limit exceeded", "client", clientIP, "limit", maxTCPConns)
+			_ = tcpConn.Close()
+			return nil
+		}
+
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			handleTCPConnection(ctx, tcpConn, upstream, c, staleAge, pool, m)
+			defer tcpTracker.dec(clientIP)
+			handleTCPConnection(ctx, tcpConn, upstream, c, runtimeCfg, pool, m)
 		}()
 		return nil
 	}
@@ -148,10 +161,32 @@ type inflightCall struct {
 	once  sync.Once
 }
 
+type tcpConnTracker struct {
+	mu    sync.Mutex
+	conns map[string]int64
+}
+
+func (t *tcpConnTracker) inc(ip string) int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.conns[ip]++
+	return t.conns[ip]
+}
+
+func (t *tcpConnTracker) dec(ip string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.conns[ip]--
+	if t.conns[ip] <= 0 {
+		delete(t.conns, ip)
+	}
+}
+
 var (
 	inflightMu    sync.Mutex
 	inflightCalls = make(map[inflightKey]*inflightCall)
 	pipelinePtr   atomic.Pointer[hooks.Pipeline]
+	tcpTracker    = &tcpConnTracker{conns: make(map[string]int64)}
 )
 
 func SetPipeline(p *hooks.Pipeline) {
@@ -177,7 +212,7 @@ func stripOPT(rrs []dns.ResourceRecord) []dns.ResourceRecord {
 	return out
 }
 
-func handleTCPConnection(ctx context.Context, conn net.Conn, upstream string, c cache.Cache, staleAge int, pool *Pool, m *metrics.Metrics) {
+func handleTCPConnection(ctx context.Context, conn net.Conn, upstream string, c cache.Cache, runtimeCfg *config.RuntimeConfig, pool *Pool, m *metrics.Metrics) {
 	ctxRead, cancelRead := context.WithCancel(ctx)
 	defer cancelRead()
 
@@ -239,7 +274,7 @@ func handleTCPConnection(ctx context.Context, conn net.Conn, upstream string, c 
 	send := func(resp []byte) error {
 		return writeTCPResponse(conn, resp)
 	}
-	processQuery(ctx, &req, "tcp", clientIP, maxPayload, do, send, upstream, c, staleAge, pool, m)
+	processQuery(ctx, &req, "tcp", clientIP, maxPayload, do, send, upstream, c, runtimeCfg, pool, m)
 }
 
 func writeTCPResponse(conn net.Conn, data []byte) error {
@@ -255,7 +290,7 @@ func writeTCPResponse(conn net.Conn, data []byte) error {
 	return err
 }
 
-func processQuery(ctx context.Context, req *dns.Message, network, clientIP string, maxPayload uint16, do bool, send func([]byte) error, upstream string, c cache.Cache, staleAge int, pool *Pool, m *metrics.Metrics) {
+func processQuery(ctx context.Context, req *dns.Message, network, clientIP string, maxPayload uint16, do bool, send func([]byte) error, upstream string, c cache.Cache, runtimeCfg *config.RuntimeConfig, pool *Pool, m *metrics.Metrics) {
 	q := req.Questions[0]
 	m.QueriesTotal.With(prometheus.Labels{"qtype": strconv.Itoa(int(q.Type))}).Inc()
 
@@ -279,7 +314,7 @@ func processQuery(ctx context.Context, req *dns.Message, network, clientIP strin
 		return
 	}
 
-	entry, err := resolve(ctx, q.Name, q.Type, upstream, c, maxPayload, network, staleAge, pool, do, m)
+	entry, err := resolve(ctx, q.Name, q.Type, upstream, c, maxPayload, network, runtimeCfg, pool, do, m)
 	if err != nil {
 		slog.Error("Upstream error", "domain", q.Name, "type", q.Type, "error", err)
 		m.ErrorsTotal.With(prometheus.Labels{"type": "servfail"}).Inc()
@@ -365,7 +400,7 @@ func sendServfail(req *dns.Message, send func([]byte) error) {
 	}
 }
 
-func handleRequest(ctx context.Context, data []byte, remoteAddr *net.UDPAddr, conn *net.UDPConn, upstream string, c cache.Cache, staleAge int, pool *Pool, m *metrics.Metrics) {
+func handleRequest(ctx context.Context, data []byte, remoteAddr *net.UDPAddr, conn *net.UDPConn, upstream string, c cache.Cache, runtimeCfg *config.RuntimeConfig, pool *Pool, m *metrics.Metrics) {
 	m.ActiveHandlers.Inc()
 	defer m.ActiveHandlers.Dec()
 
@@ -387,10 +422,10 @@ func handleRequest(ctx context.Context, data []byte, remoteAddr *net.UDPAddr, co
 		_, err := conn.WriteToUDP(resp, remoteAddr)
 		return err
 	}
-	processQuery(ctx, &req, "udp", clientIP, maxPayload, do, send, upstream, c, staleAge, pool, m)
+	processQuery(ctx, &req, "udp", clientIP, maxPayload, do, send, upstream, c, runtimeCfg, pool, m)
 }
 
-func fetchFromUpstream(ctx context.Context, domain string, qtype uint16, maxPayload uint16, network string, pool *Pool, do bool, m *metrics.Metrics) (*cache.Entry, error) {
+func fetchFromUpstream(ctx context.Context, domain string, qtype uint16, maxPayload uint16, network string, pool *Pool, do bool, m *metrics.Metrics, ttlMin, ttlMax, negativeTTL int) (*cache.Entry, error) {
 	start := time.Now()
 	defer func() {
 		m.UpstreamLatency.Observe(time.Since(start).Seconds())
@@ -498,18 +533,19 @@ func fetchFromUpstream(ctx context.Context, domain string, qtype uint16, maxPayl
 	}
 
 	pool.Release(fwd, nil)
-	entry := cache.NewEntry(domain, qtype, reply.Answers, reply.Authorities, stripOPT(reply.Additionals))
+	rcode := reply.Header.Flags & 0x000F
+	entry := cache.NewEntry(domain, qtype, rcode, reply.Answers, reply.Authorities, stripOPT(reply.Additionals), ttlMin, ttlMax, negativeTTL)
 	entry.Flags = reply.Header.Flags
 	entry.RCode = reply.Header.Flags & 0x000F
 	entry.AuthenticData = reply.Header.Flags&0x0020 != 0
 	return entry, nil
 }
 
-func refreshCache(call *inflightCall, ikey inflightKey, domain string, qtype uint16, c cache.Cache, maxPayload uint16, network string, pool *Pool, do bool, m *metrics.Metrics) {
+func refreshCache(call *inflightCall, ikey inflightKey, domain string, qtype uint16, c cache.Cache, maxPayload uint16, network string, pool *Pool, do bool, m *metrics.Metrics, ttlMin, ttlMax, negativeTTL int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	entry, err := fetchFromUpstream(ctx, domain, qtype, maxPayload, network, pool, do, m)
+	entry, err := fetchFromUpstream(ctx, domain, qtype, maxPayload, network, pool, do, m, ttlMin, ttlMax, negativeTTL)
 	if err == nil {
 		if err := c.Set(ctx, entry); err != nil {
 			slog.Error("Background refresh cache set failed", "domain", domain, "type", qtype, "error", err)
@@ -525,17 +561,21 @@ func refreshCache(call *inflightCall, ikey inflightKey, domain string, qtype uin
 	inflightMu.Unlock()
 }
 
-func resolve(ctx context.Context, domain string, qtype uint16, upstream string, c cache.Cache, maxPayload uint16, network string, staleAge int, pool *Pool, do bool, m *metrics.Metrics) (*cache.Entry, error) {
+func resolve(ctx context.Context, domain string, qtype uint16, upstream string, c cache.Cache, maxPayload uint16, network string, runtimeCfg *config.RuntimeConfig, pool *Pool, do bool, m *metrics.Metrics) (*cache.Entry, error) {
 	m.CacheLookups.Inc()
+	ttlMin := int(runtimeCfg.TTLMin.Load())
+	ttlMax := int(runtimeCfg.TTLMax.Load())
+	negativeTTL := int(runtimeCfg.NegativeTTL.Load())
 
 	entry, found := c.Peek(ctx, domain, qtype)
 	if found {
 		if !entry.Expired() {
 			slog.Debug("Cache hit", "domain", domain, "type", qtype)
 			m.CacheHits.Inc()
+			entry.RecordHit()
 			return entry, nil
 		}
-		if staleAge > 0 {
+		if staleAge := int(runtimeCfg.StaleAge.Load()); staleAge > 0 {
 			expiredFor := time.Since(entry.ExpiresAt)
 			if expiredFor < time.Duration(staleAge)*time.Second {
 				slog.Info("Serving stale entry, refreshing in background", "domain", domain, "type", qtype)
@@ -545,7 +585,7 @@ func resolve(ctx context.Context, domain string, qtype uint16, upstream string, 
 					call := &inflightCall{done: make(chan struct{})}
 					inflightCalls[ikey] = call
 					inflightMu.Unlock()
-					go refreshCache(call, ikey, domain, qtype, c, maxPayload, network, pool, do, m)
+					go refreshCache(call, ikey, domain, qtype, c, maxPayload, network, pool, do, m, ttlMin, ttlMax, negativeTTL)
 				} else {
 					inflightMu.Unlock()
 				}
@@ -582,7 +622,7 @@ func resolve(ctx context.Context, domain string, qtype uint16, upstream string, 
 		inflightMu.Unlock()
 	}()
 
-	entry, err := fetchFromUpstream(ctx, domain, qtype, maxPayload, network, pool, do, m)
+	entry, err := fetchFromUpstream(ctx, domain, qtype, maxPayload, network, pool, do, m, ttlMin, ttlMax, negativeTTL)
 	if err != nil {
 		call.err = err
 		return nil, err

@@ -8,13 +8,17 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/bata94/northstar/dns"
 	"github.com/valkey-io/valkey-go"
 )
 
-const valkeyValueVer byte = 0x01
+const (
+	valkeyValueVer  byte = 0x01
+	valkeyValueVer2 byte = 0x02
+)
 
 type Valkey struct {
 	client   valkey.Client
@@ -53,18 +57,38 @@ func (v *Valkey) Get(ctx context.Context, domain string, qtype uint16) (*Entry, 
 
 	var expiresAt time.Time
 	var wireData []byte
+	var hitCount int64
+	var lastHitAt time.Time
 
-	if len(data) > 0 && data[0] == valkeyValueVer && len(data) >= 9 {
-		nano := int64(binary.BigEndian.Uint64(data[1:9]))
-		expiresAt = time.Unix(0, nano)
-		wireData = data[9:]
-	} else {
-		remaining, err := v.client.Do(ctx, v.client.B().Ttl().Key(key).Build()).AsInt64()
-		if err != nil || remaining <= 0 {
-			return nil, false
+	if len(data) > 0 && len(data) >= 9 {
+		ver := data[0]
+		switch ver {
+		case valkeyValueVer2:
+			if len(data) < 25 {
+				return nil, false
+			}
+			nano := int64(binary.BigEndian.Uint64(data[1:9]))
+			expiresAt = time.Unix(0, nano)
+			hitCount = int64(binary.BigEndian.Uint64(data[9:17]))
+			lhNano := int64(binary.BigEndian.Uint64(data[17:25]))
+			if lhNano != 0 {
+				lastHitAt = time.Unix(0, lhNano)
+			}
+			wireData = data[25:]
+		case valkeyValueVer:
+			nano := int64(binary.BigEndian.Uint64(data[1:9]))
+			expiresAt = time.Unix(0, nano)
+			wireData = data[9:]
+		default:
+			remaining, err := v.client.Do(ctx, v.client.B().Ttl().Key(key).Build()).AsInt64()
+			if err != nil || remaining <= 0 {
+				return nil, false
+			}
+			expiresAt = time.Now().Add(time.Duration(remaining) * time.Second)
+			wireData = data
 		}
-		expiresAt = time.Now().Add(time.Duration(remaining) * time.Second)
-		wireData = data
+	} else {
+		return nil, false
 	}
 
 	var msg dns.Message
@@ -73,7 +97,7 @@ func (v *Valkey) Get(ctx context.Context, domain string, qtype uint16) (*Entry, 
 		return nil, false
 	}
 
-	return &Entry{
+	entry := &Entry{
 		Domain:        domain,
 		QType:         qtype,
 		RCode:         msg.Header.Flags & 0x000F,
@@ -82,7 +106,12 @@ func (v *Valkey) Get(ctx context.Context, domain string, qtype uint16) (*Entry, 
 		Authorities:   msg.Authorities,
 		Additionals:   msg.Additionals,
 		ExpiresAt:     expiresAt,
-	}, true
+	}
+	entry.HitCount.Store(hitCount)
+	if !lastHitAt.IsZero() {
+		entry.SetLastHitAt(lastHitAt)
+	}
+	return entry, true
 }
 
 func (v *Valkey) Peek(ctx context.Context, domain string, qtype uint16) (*Entry, bool) {
@@ -116,16 +145,80 @@ func (v *Valkey) Set(ctx context.Context, entry *Entry) error {
 	}
 	wireData := msg.Pack()
 
-	buf := make([]byte, 1+8+len(wireData))
-	buf[0] = valkeyValueVer
+	buf := make([]byte, 1+8+8+8+len(wireData))
+	buf[0] = valkeyValueVer2
 	binary.BigEndian.PutUint64(buf[1:9], uint64(entry.ExpiresAt.UnixNano()))
-	copy(buf[9:], wireData)
+	binary.BigEndian.PutUint64(buf[9:17], uint64(entry.HitCount.Load()))
+	binary.BigEndian.PutUint64(buf[17:25], uint64(entry.LastHitAt().UnixNano()))
+	copy(buf[25:], wireData)
 
 	key := v.key(entry.Domain, entry.QType)
 	if err := v.client.Do(ctx, v.client.B().Set().Key(key).Value(string(buf)).ExSeconds(int64(ttl.Seconds())).Build()).Error(); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (v *Valkey) Warmup(ctx context.Context, dest Cache) error {
+	var cursor uint64
+	for {
+		result := v.client.Do(ctx, v.client.B().Scan().Cursor(cursor).Match("northstar:*").Count(1000).Build())
+		entry, err := result.AsScanEntry()
+		if err != nil {
+			return fmt.Errorf("valkey warmup scan: %w", err)
+		}
+		for _, key := range entry.Elements {
+			data, err := v.client.Do(ctx, v.client.B().Get().Key(key).Build()).AsBytes()
+			if err != nil {
+				continue
+			}
+			domain, qtype := parseKey(key)
+			if domain == "" {
+				continue
+			}
+			entry, ok := decodeEntry(domain, qtype, data)
+			if !ok || entry.Expired() {
+				continue
+			}
+			if err := dest.Set(ctx, entry); err != nil {
+				slog.Error("Valkey warmup set", "error", err)
+			}
+		}
+		if entry.Cursor == 0 {
+			break
+		}
+		cursor = entry.Cursor
+	}
+	return nil
+}
+
+func parseKey(key string) (string, uint16) {
+	parts := split2(key, ":")
+	if len(parts) < 3 {
+		return "", 0
+	}
+	return parts[1], uint16(atoiOrZero(parts[2]))
+}
+
+func split2(s, sep string) []string {
+	var result []string
+	for i := 0; i < 2; i++ {
+		idx := strings.Index(s, sep)
+		if idx < 0 {
+			result = append(result, s)
+			return result
+		}
+		result = append(result, s[:idx])
+		s = s[idx+len(sep):]
+	}
+	result = append(result, s)
+	return result
+}
+
+func atoiOrZero(s string) int {
+	n := 0
+	_, _ = fmt.Sscanf(s, "%d", &n)
+	return n
 }
 
 func (v *Valkey) Incr(ctx context.Context, key string, ttl time.Duration) (int64, error) {

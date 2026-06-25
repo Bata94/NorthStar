@@ -38,7 +38,7 @@ func TestPipelineRegisterAndRunEmpty(t *testing.T) {
 }
 
 func TestRateLimitHook(t *testing.T) {
-	mem := cache.NewMemory()
+	mem := cache.NewMemory(0)
 	defer mem.Close()
 
 	m := metrics.New()
@@ -70,6 +70,47 @@ func TestRateLimitHook(t *testing.T) {
 	// 6th call should be rate limited
 	if err := p.Run(PreResolve, ctx); err != ErrRateLimited {
 		t.Errorf("expected ErrRateLimited, got %v", err)
+	}
+}
+
+func TestRateLimitHookDropAction(t *testing.T) {
+	mem := cache.NewMemory(0)
+	defer mem.Close()
+
+	m := metrics.New()
+
+	hook := NewRateLimitHook(1, "drop", 100, true)
+	p := NewPipeline()
+	p.Register(hook)
+
+	sendCalled := false
+	ctx := &Context{
+		Ctx: context.Background(),
+		Request: &dns.Message{
+			Header:    dns.Header{ID: 42, QDCount: 1},
+			Questions: []dns.Question{{Name: "example.com", Type: 1, Class: 1}},
+		},
+		ClientIP: "10.0.0.2",
+		Network:  "udp",
+		Cache:    mem,
+		Metrics:  m,
+		Send: func(_ []byte) error {
+			sendCalled = true
+			return nil
+		},
+	}
+
+	// First call passes
+	if err := p.Run(PreResolve, ctx); err != nil {
+		t.Fatalf("first call: unexpected error: %v", err)
+	}
+
+	// Second call exceeds rate, should NOT call Send with "drop" action
+	if err := p.Run(PreResolve, ctx); err != ErrRateLimited {
+		t.Errorf("expected ErrRateLimited, got %v", err)
+	}
+	if sendCalled {
+		t.Error("Send should not be called with 'drop' action")
 	}
 }
 

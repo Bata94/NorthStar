@@ -10,12 +10,23 @@ import (
 	"time"
 
 	"github.com/bata94/northstar/cache"
+	"github.com/bata94/northstar/config"
 	"github.com/bata94/northstar/dns"
 	"github.com/bata94/northstar/metrics"
 )
 
 func testMetrics() *metrics.Metrics {
 	return metrics.New()
+}
+
+func testRuntimeConfig(staleAge int) *config.RuntimeConfig {
+	rc := config.NewRuntimeConfig(&config.Config{
+		StaleAge: staleAge,
+		Hooks: config.HookConfig{
+			RateLimiting: config.RateLimitHookConfig{Enabled: false},
+		},
+	})
+	return rc
 }
 
 type mockUpstream struct {
@@ -182,21 +193,21 @@ func TestClientEDNS(t *testing.T) {
 }
 
 func TestResolveCacheHit(t *testing.T) {
-	m := cache.NewMemory()
+	m := cache.NewMemory(0)
 	defer m.Close() //nolint:errcheck
 
 	ctx := context.Background()
-	entry := cache.NewEntry("example.com", 1,
+	entry := cache.NewEntry("example.com", 1, 0,
 		[]dns.ResourceRecord{
 			{Name: "example.com", Type: 1, Class: 1, TTL: 300,
 				RDLength: 4, RData: net.ParseIP("1.2.3.4").To4()},
-		}, nil, nil)
+		}, nil, nil, 0, 0, 0)
 	_ = m.Set(ctx, entry)
 
 	pool := NewPool("127.0.0.1:9999", "udp", 5, time.Minute)
 	defer pool.Close()
 
-	result, err := resolve(ctx, "example.com", 1, "127.0.0.1:9999", m, 512, "udp", 0, pool, false, testMetrics())
+	result, err := resolve(ctx, "example.com", 1, "127.0.0.1:9999", m, 512, "udp", testRuntimeConfig(0), pool, false, testMetrics())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +217,7 @@ func TestResolveCacheHit(t *testing.T) {
 }
 
 func TestResolveCacheMissUpstream(t *testing.T) {
-	m := cache.NewMemory()
+	m := cache.NewMemory(0)
 	defer m.Close() //nolint:errcheck
 
 	up := startMockUpstream(t, "udp", func(data []byte) []byte {
@@ -220,7 +231,7 @@ func TestResolveCacheMissUpstream(t *testing.T) {
 	defer pool.Close()
 
 	ctx := context.Background()
-	result, err := resolve(ctx, "example.com", 1, up.addr.String(), m, 512, "udp", 0, pool, false, testMetrics())
+	result, err := resolve(ctx, "example.com", 1, up.addr.String(), m, 512, "udp", testRuntimeConfig(0), pool, false, testMetrics())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,21 +249,21 @@ func TestResolveCacheMissUpstream(t *testing.T) {
 }
 
 func TestResolveUpstreamError(t *testing.T) {
-	m := cache.NewMemory()
+	m := cache.NewMemory(0)
 	defer m.Close() //nolint:errcheck
 
 	pool := NewPool("127.0.0.1:1", "udp", 5, time.Minute)
 	defer pool.Close()
 
 	ctx := context.Background()
-	_, err := resolve(ctx, "example.com", 1, "127.0.0.1:1", m, 512, "udp", 0, pool, false, testMetrics())
+	_, err := resolve(ctx, "example.com", 1, "127.0.0.1:1", m, 512, "udp", testRuntimeConfig(0), pool, false, testMetrics())
 	if err == nil {
 		t.Fatal("expected error from unreachable upstream")
 	}
 }
 
 func TestResolveNXDOMAIN(t *testing.T) {
-	m := cache.NewMemory()
+	m := cache.NewMemory(0)
 	defer m.Close() //nolint:errcheck
 
 	up := startMockUpstream(t, "udp", func(data []byte) []byte {
@@ -264,7 +275,7 @@ func TestResolveNXDOMAIN(t *testing.T) {
 	defer pool.Close()
 
 	ctx := context.Background()
-	result, err := resolve(ctx, "nonexistent.example", 1, up.addr.String(), m, 512, "udp", 0, pool, false, testMetrics())
+	result, err := resolve(ctx, "nonexistent.example", 1, up.addr.String(), m, 512, "udp", testRuntimeConfig(0), pool, false, testMetrics())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,15 +285,15 @@ func TestResolveNXDOMAIN(t *testing.T) {
 }
 
 func TestResolveStaleWhileRevalidate(t *testing.T) {
-	m := cache.NewMemory()
+	m := cache.NewMemory(0)
 	defer m.Close() //nolint:errcheck
 
 	ctx := context.Background()
-	e := cache.NewEntry("stale.example", 1,
+	e := cache.NewEntry("stale.example", 1, 0,
 		[]dns.ResourceRecord{
 			{Name: "stale.example", Type: 1, Class: 1, TTL: 1,
 				RDLength: 4, RData: net.ParseIP("9.9.9.9").To4()},
-		}, nil, nil)
+		}, nil, nil, 0, 0, 0)
 	e.ExpiresAt = time.Now().Add(-time.Second)
 	_ = m.Set(ctx, e)
 
@@ -297,7 +308,7 @@ func TestResolveStaleWhileRevalidate(t *testing.T) {
 	pool := NewPool(up.addr.String(), "udp", 5, time.Minute)
 	defer pool.Close()
 
-	result, err := resolve(ctx, "stale.example", 1, up.addr.String(), m, 512, "udp", 10, pool, false, testMetrics())
+	result, err := resolve(ctx, "stale.example", 1, up.addr.String(), m, 512, "udp", testRuntimeConfig(10), pool, false, testMetrics())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +362,7 @@ func TestFetchFromUpstreamDNSSEC(t *testing.T) {
 	defer pool.Close()
 
 	ctx := context.Background()
-	entry, err := fetchFromUpstream(ctx, "dnssec.example", 1, 512, "udp", pool, true, testMetrics())
+	entry, err := fetchFromUpstream(ctx, "dnssec.example", 1, 512, "udp", pool, true, testMetrics(), 0, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +372,7 @@ func TestFetchFromUpstreamDNSSEC(t *testing.T) {
 }
 
 func TestResolveInflightDedup(t *testing.T) {
-	m := cache.NewMemory()
+	m := cache.NewMemory(0)
 	defer m.Close() //nolint:errcheck
 
 	callCount := 0
@@ -381,7 +392,7 @@ func TestResolveInflightDedup(t *testing.T) {
 	errs := make(chan error, 3)
 	for range 3 {
 		go func() {
-			_, err := resolve(ctx, "inflight.example", 1, up.addr.String(), m, 512, "udp", 0, pool, false, testMetrics())
+			_, err := resolve(ctx, "inflight.example", 1, up.addr.String(), m, 512, "udp", testRuntimeConfig(0), pool, false, testMetrics())
 			errs <- err
 		}()
 	}
@@ -409,7 +420,7 @@ func TestFetchFromUpstreamTCP(t *testing.T) {
 	defer pool.Close()
 
 	ctx := context.Background()
-	entry, err := fetchFromUpstream(ctx, "tcp.example", 1, 512, "tcp", pool, false, testMetrics())
+	entry, err := fetchFromUpstream(ctx, "tcp.example", 1, 512, "tcp", pool, false, testMetrics(), 0, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

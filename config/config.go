@@ -33,12 +33,17 @@ type Config struct {
 	DNSPort          int
 	UpstreamAddr     string
 	CacheAddr        string
+	CacheFile        string
 	Listeners        []Listener
 	Ipv4Disable      bool
 	Ipv6Disable      bool
 	TcpDisable       bool
 	RateLimit        int
 	StaleAge         int
+	NegativeTTL      int
+	TTLMin           int
+	TTLMax           int
+	CacheMaxEntries  int
 	UpstreamPoolSize int
 	UpstreamPoolIdle int
 	LogLevel         string
@@ -46,8 +51,10 @@ type Config struct {
 	LogDir           string
 	LogRetention     int
 	TimeZone         string
-	MetricsEnable    bool
-	MetricsPort      int
+	CacheWarmup          bool
+	MaxTCPConnsPerClient int
+	MetricsEnable        bool
+	MetricsPort          int
 	ConfigPath       string
 	Hooks            HookConfig
 }
@@ -66,11 +73,16 @@ func Load() Config {
 		DNSPort:          53,
 		UpstreamAddr:     "8.8.8.8:53",
 		CacheAddr:        "",
+		CacheFile:        "",
 		Ipv4Disable:      false,
 		Ipv6Disable:      false,
 		TcpDisable:       false,
 		RateLimit:        0,
 		StaleAge:         60,
+		NegativeTTL:      0,
+		TTLMin:           0,
+		TTLMax:           0,
+		CacheMaxEntries:  0,
 		UpstreamPoolSize: 10,
 		UpstreamPoolIdle: 30,
 		LogLevel:         "",
@@ -78,8 +90,10 @@ func Load() Config {
 		LogDir:           ".",
 		LogRetention:     7,
 		TimeZone:         "",
-		MetricsEnable:    false,
-		MetricsPort:      9153,
+		CacheWarmup:          false,
+		MaxTCPConnsPerClient: 0,
+		MetricsEnable:        false,
+		MetricsPort:          9153,
 		Hooks: HookConfig{
 			RateLimiting: RateLimitHookConfig{
 				Enabled:  false,
@@ -119,11 +133,16 @@ func Reload() (Config, error) {
 		DNSPort:          53,
 		UpstreamAddr:     "8.8.8.8:53",
 		CacheAddr:        "",
+		CacheFile:        "",
 		Ipv4Disable:      false,
 		Ipv6Disable:      false,
 		TcpDisable:       false,
 		RateLimit:        0,
 		StaleAge:         60,
+		NegativeTTL:      0,
+		TTLMin:           0,
+		TTLMax:           0,
+		CacheMaxEntries:  0,
 		UpstreamPoolSize: 10,
 		UpstreamPoolIdle: 30,
 		LogLevel:         "",
@@ -131,8 +150,10 @@ func Reload() (Config, error) {
 		LogDir:           ".",
 		LogRetention:     7,
 		TimeZone:         "",
-		MetricsEnable:    false,
-		MetricsPort:      9153,
+		CacheWarmup:          false,
+		MaxTCPConnsPerClient: 0,
+		MetricsEnable:        false,
+		MetricsPort:          9153,
 		Hooks: HookConfig{
 			RateLimiting: RateLimitHookConfig{
 				Enabled:  false,
@@ -183,6 +204,9 @@ func applyEnvOverrides(cfg *Config) {
 	if v, ok := os.LookupEnv("NORTHSTAR_CACHE_ADDR"); ok {
 		cfg.CacheAddr = v
 	}
+	if v, ok := os.LookupEnv("NORTHSTAR_CACHE_FILE"); ok {
+		cfg.CacheFile = v
+	}
 	if v, ok := os.LookupEnv("NORTHSTAR_DNS_IPV4_DISABLE"); ok {
 		cfg.Ipv4Disable = isTrue(v)
 	}
@@ -197,6 +221,18 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v, ok := os.LookupEnv("NORTHSTAR_DNS_STALE_AGE"); ok {
 		cfg.StaleAge = atoiOrZero(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_DNS_NEGATIVE_TTL"); ok {
+		cfg.NegativeTTL = atoiOrZero(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_DNS_CACHE_MAX_ENTRIES"); ok {
+		cfg.CacheMaxEntries = atoiOrZero(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_DNS_TTL_MIN"); ok {
+		cfg.TTLMin = atoiOrZero(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_DNS_TTL_MAX"); ok {
+		cfg.TTLMax = atoiOrZero(v)
 	}
 	if v, ok := os.LookupEnv("NORTHSTAR_UPSTREAM_POOL_SIZE"); ok {
 		cfg.UpstreamPoolSize = atoiOrZero(v)
@@ -218,6 +254,12 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v, ok := os.LookupEnv("NORTHSTAR_TZ"); ok {
 		cfg.TimeZone = v
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_DNS_CACHE_WARMUP"); ok {
+		cfg.CacheWarmup = isTrue(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_DNS_MAX_TCP_CONNS_PER_CLIENT"); ok {
+		cfg.MaxTCPConnsPerClient = atoiOrZero(v)
 	}
 	if v, ok := os.LookupEnv("NORTHSTAR_METRICS_ENABLE"); ok {
 		cfg.MetricsEnable = isTrue(v)

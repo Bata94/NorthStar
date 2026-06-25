@@ -26,19 +26,26 @@ type FileConfig struct {
 	DNSPort          *int            `yaml:"dns_port"`
 	UpstreamAddr     *string         `yaml:"upstream"`
 	CacheAddr        *string         `yaml:"cache_addr"`
+	CacheFile        *string         `yaml:"cache_file"`
 	Ipv4Disable      *bool           `yaml:"ipv4_disable"`
 	Ipv6Disable      *bool           `yaml:"ipv6_disable"`
 	TcpDisable       *bool           `yaml:"tcp_disable"`
 	RateLimit        *int            `yaml:"rate_limit"`
 	StaleAge         *int            `yaml:"stale_age"`
+	NegativeTTL      *int            `yaml:"negative_ttl"`
+	CacheWarmup      *bool           `yaml:"cache_warmup"`
+	CacheMaxEntries  *int            `yaml:"cache_max_entries"`
+	TTLMin           *int            `yaml:"ttl_min"`
+	TTLMax           *int            `yaml:"ttl_max"`
 	UpstreamPoolSize *int            `yaml:"upstream_pool_size"`
 	UpstreamPoolIdle *int            `yaml:"upstream_pool_idle"`
 	LogLevel         *string         `yaml:"log_level"`
 	LogMode          *string         `yaml:"log_mode"`
 	LogDir           *string         `yaml:"log_dir"`
 	LogRetention     *int            `yaml:"log_retention"`
-	TimeZone         *string         `yaml:"timezone"`
-	MetricsEnable    *bool           `yaml:"metrics_enable"`
+	TimeZone             *string         `yaml:"timezone"`
+	MaxTCPConnsPerClient *int            `yaml:"max_tcp_conns_per_client"`
+	MetricsEnable        *bool           `yaml:"metrics_enable"`
 	MetricsPort      *int            `yaml:"metrics_port"`
 	Hooks            *FileHookConfig `yaml:"hooks"`
 }
@@ -68,6 +75,9 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 	if fc.CacheAddr != nil {
 		cfg.CacheAddr = *fc.CacheAddr
 	}
+	if fc.CacheFile != nil {
+		cfg.CacheFile = *fc.CacheFile
+	}
 	if fc.Ipv4Disable != nil {
 		cfg.Ipv4Disable = *fc.Ipv4Disable
 	}
@@ -82,6 +92,21 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 	}
 	if fc.StaleAge != nil {
 		cfg.StaleAge = *fc.StaleAge
+	}
+	if fc.NegativeTTL != nil {
+		cfg.NegativeTTL = *fc.NegativeTTL
+	}
+	if fc.CacheWarmup != nil {
+		cfg.CacheWarmup = *fc.CacheWarmup
+	}
+	if fc.CacheMaxEntries != nil {
+		cfg.CacheMaxEntries = *fc.CacheMaxEntries
+	}
+	if fc.TTLMin != nil {
+		cfg.TTLMin = *fc.TTLMin
+	}
+	if fc.TTLMax != nil {
+		cfg.TTLMax = *fc.TTLMax
 	}
 	if fc.UpstreamPoolSize != nil {
 		cfg.UpstreamPoolSize = *fc.UpstreamPoolSize
@@ -103,6 +128,9 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 	}
 	if fc.TimeZone != nil {
 		cfg.TimeZone = *fc.TimeZone
+	}
+	if fc.MaxTCPConnsPerClient != nil {
+		cfg.MaxTCPConnsPerClient = *fc.MaxTCPConnsPerClient
 	}
 	if fc.MetricsEnable != nil {
 		cfg.MetricsEnable = *fc.MetricsEnable
@@ -131,11 +159,17 @@ func configToFile(cfg *Config) *FileConfig {
 	dnsPort := cfg.DNSPort
 	upstream := cfg.UpstreamAddr
 	cacheAddr := cfg.CacheAddr
+	cacheFile := cfg.CacheFile
 	ipv4Disable := cfg.Ipv4Disable
 	ipv6Disable := cfg.Ipv6Disable
 	tcpDisable := cfg.TcpDisable
 	rateLimit := cfg.RateLimit
 	staleAge := cfg.StaleAge
+	negativeTTL := cfg.NegativeTTL
+	cacheWarmup := cfg.CacheWarmup
+	cacheMaxEntries := cfg.CacheMaxEntries
+	ttlMin := cfg.TTLMin
+	ttlMax := cfg.TTLMax
 	upstreamPoolSize := cfg.UpstreamPoolSize
 	upstreamPoolIdle := cfg.UpstreamPoolIdle
 	logLevel := cfg.LogLevel
@@ -143,6 +177,7 @@ func configToFile(cfg *Config) *FileConfig {
 	logDir := cfg.LogDir
 	logRetention := cfg.LogRetention
 	timeZone := cfg.TimeZone
+	maxTCPConnsPerClient := cfg.MaxTCPConnsPerClient
 	metricsEnable := cfg.MetricsEnable
 	metricsPort := cfg.MetricsPort
 	hookEnabled := cfg.Hooks.RateLimiting.Enabled
@@ -155,19 +190,26 @@ func configToFile(cfg *Config) *FileConfig {
 		DNSPort:          &dnsPort,
 		UpstreamAddr:     &upstream,
 		CacheAddr:        &cacheAddr,
+		CacheFile:        &cacheFile,
 		Ipv4Disable:      &ipv4Disable,
 		Ipv6Disable:      &ipv6Disable,
 		TcpDisable:       &tcpDisable,
 		RateLimit:        &rateLimit,
 		StaleAge:         &staleAge,
+		NegativeTTL:      &negativeTTL,
+		CacheWarmup:      &cacheWarmup,
+		CacheMaxEntries:  &cacheMaxEntries,
+		TTLMin:           &ttlMin,
+		TTLMax:           &ttlMax,
 		UpstreamPoolSize: &upstreamPoolSize,
 		UpstreamPoolIdle: &upstreamPoolIdle,
 		LogLevel:         &logLevel,
 		LogMode:          &logMode,
 		LogDir:           &logDir,
 		LogRetention:     &logRetention,
-		TimeZone:         &timeZone,
-		MetricsEnable:    &metricsEnable,
+		TimeZone:             &timeZone,
+		MaxTCPConnsPerClient: &maxTCPConnsPerClient,
+		MetricsEnable:        &metricsEnable,
 		MetricsPort:      &metricsPort,
 		Hooks: &FileHookConfig{
 			RateLimiting: FileRateLimitHookConfig{
@@ -211,11 +253,17 @@ func WriteDefaultConfig(path string) error {
 	dnsPort := 53
 	upstream := "8.8.8.8:53"
 	cacheAddr := ""
+	cacheFile := ""
 	ipv4Disable := false
 	ipv6Disable := false
 	tcpDisable := false
 	rateLimit := 0
 	staleAge := 60
+	negativeTTL := 0
+	cacheWarmup := false
+	cacheMaxEntries := 0
+	ttlMin := 0
+	ttlMax := 0
 	upstreamPoolSize := 10
 	upstreamPoolIdle := 30
 	logLevel := ""
@@ -223,6 +271,7 @@ func WriteDefaultConfig(path string) error {
 	logDir := "."
 	logRetention := 7
 	timeZone := ""
+	maxTCPConnsPerClient := 0
 	metricsEnable := false
 	metricsPort := 9153
 	hookEnabled := false
@@ -235,19 +284,26 @@ func WriteDefaultConfig(path string) error {
 		DNSPort:          &dnsPort,
 		UpstreamAddr:     &upstream,
 		CacheAddr:        &cacheAddr,
+		CacheFile:        &cacheFile,
 		Ipv4Disable:      &ipv4Disable,
 		Ipv6Disable:      &ipv6Disable,
 		TcpDisable:       &tcpDisable,
 		RateLimit:        &rateLimit,
 		StaleAge:         &staleAge,
+		NegativeTTL:      &negativeTTL,
+		CacheWarmup:      &cacheWarmup,
+		CacheMaxEntries:  &cacheMaxEntries,
+		TTLMin:           &ttlMin,
+		TTLMax:           &ttlMax,
 		UpstreamPoolSize: &upstreamPoolSize,
 		UpstreamPoolIdle: &upstreamPoolIdle,
 		LogLevel:         &logLevel,
 		LogMode:          &logMode,
 		LogDir:           &logDir,
 		LogRetention:     &logRetention,
-		TimeZone:         &timeZone,
-		MetricsEnable:    &metricsEnable,
+		TimeZone:             &timeZone,
+		MaxTCPConnsPerClient: &maxTCPConnsPerClient,
+		MetricsEnable:        &metricsEnable,
 		MetricsPort:      &metricsPort,
 		Hooks: &FileHookConfig{
 			RateLimiting: FileRateLimitHookConfig{
