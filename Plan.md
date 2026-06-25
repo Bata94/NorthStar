@@ -5,10 +5,10 @@
 
 ## Transport Security & Privacy
 
-- DNS-over-HTTPS (DoH) — both upstream and client-facing listener
-- DNS-over-TLS (DoT) — both upstream and client-facing listener
-- DNS-over-QUIC (DoQ) — both upstream and client-facing listener
-- QNAME Minimization — strip labels from query name before forwarding
+- [X] DNS-over-HTTPS (DoH) — both upstream and client-facing listener
+- [X] DNS-over-TLS (DoT) — both upstream and client-facing listener
+- [X] DNS-over-QUIC (DoQ) — both upstream and client-facing listener
+- [X] QNAME Minimization — strip labels from query name before forwarding
   to reduce disclosure to upstream resolvers
 
 ## Caching
@@ -236,11 +236,11 @@ forwarding, and intelligent routing.
 **Goal:** Encrypted DNS transports for both client-facing and upstream
 communication.
 
-- [ ] Reverse Proxy integration (i.e. Caddy or Traefik)
-- [ ] DNS-over-TLS (DoT) — upstream + listener
-- [ ] DNS-over-HTTPS (DoH) — upstream + listener
-- [ ] DNS-over-QUIC (DoQ) — upstream + listener
-- [ ] QNAME Minimization
+- [X] Reverse Proxy integration (i.e. Caddy or Traefik)
+- [X] DNS-over-TLS (DoT) — upstream + listener
+- [X] DNS-over-HTTPS (DoH) — upstream + listener
+- [X] DNS-over-QUIC (DoQ) — upstream + listener
+- [X] QNAME Minimization
 
 **Depends on:** Phase 1 (config file for TLS cert paths, upstream URLs)
 

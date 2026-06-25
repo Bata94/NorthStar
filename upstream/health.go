@@ -5,6 +5,7 @@ package upstream
 
 import (
 	"context"
+	"crypto/tls"
 	"log/slog"
 	"math/rand"
 	"net"
@@ -122,7 +123,21 @@ func (hc *HealthChecker) probe() {
 	}
 
 	start := time.Now()
-	conn, err := net.DialTimeout("udp", u.Config.Address, probeTO)
+	var conn net.Conn
+	var err error
+	if u.Config.TLS {
+		serverName := u.Config.TLSServerName
+		if serverName == "" {
+			host, _, _ := net.SplitHostPort(u.Config.Address)
+			serverName = host
+		}
+		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: probeTO}, "tcp", u.Config.Address, &tls.Config{
+			ServerName: serverName,
+			MinVersion: tls.VersionTLS12,
+		})
+	} else {
+		conn, err = net.DialTimeout("udp", u.Config.Address, probeTO)
+	}
 	if err != nil {
 		slog.Debug("Health probe failed (dial)", "upstream", u.Name, "error", err)
 		u.ReportFailure()

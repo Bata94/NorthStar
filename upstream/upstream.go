@@ -5,6 +5,7 @@ package upstream
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net"
@@ -23,6 +24,8 @@ type Upstream struct {
 	Config  config.UpstreamConfig
 	UDPPool *pool.Pool
 	TCPPool *pool.Pool
+	DoH     *DoHClient
+	DoQ     *DoQClient
 
 	healthy     atomic.Bool
 	failCount   atomic.Int64
@@ -105,8 +108,38 @@ func newUpstream(cfg config.UpstreamConfig, poolSize, poolIdle int) *Upstream {
 		Config: cfg,
 	}
 	idleTO := time.Duration(poolIdle) * time.Second
-	u.UDPPool = pool.New(cfg.Address, "udp", poolSize, idleTO)
-	u.TCPPool = pool.New(cfg.Address, "tcp", poolSize, idleTO)
+	if cfg.DoQ {
+		u.DoQ = NewDoQClient(cfg.Address, cfg.TLSServerName, cfg.Timeout)
+		u.healthy.Store(true)
+		return u
+	}
+	if cfg.DoHURL != "" {
+		u.DoH = NewDoHClient(cfg.DoHURL, cfg.Timeout)
+		u.healthy.Store(true)
+		return u
+	}
+	if cfg.TLS {
+		serverName := cfg.TLSServerName
+		if serverName == "" {
+			host, _, err := net.SplitHostPort(cfg.Address)
+			if err == nil {
+				serverName = host
+			} else {
+				serverName = cfg.Address
+			}
+		}
+		tc := &tls.Config{
+			ServerName: serverName,
+			MinVersion: tls.VersionTLS12,
+		}
+		tcpPool := pool.New(cfg.Address, "tcp", poolSize, idleTO)
+		tcpPool.SetTLSConfig(tc)
+		u.TCPPool = tcpPool
+		u.UDPPool = pool.New(cfg.Address, "udp", 0, idleTO)
+	} else {
+		u.UDPPool = pool.New(cfg.Address, "udp", poolSize, idleTO)
+		u.TCPPool = pool.New(cfg.Address, "tcp", poolSize, idleTO)
+	}
 	u.healthy.Store(true)
 	return u
 }

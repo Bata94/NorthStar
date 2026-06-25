@@ -5,6 +5,7 @@ package pool
 
 import (
 	"context"
+	"crypto/tls"
 	"log/slog"
 	"net"
 	"sync"
@@ -25,6 +26,7 @@ type Pool struct {
 	idleTO   time.Duration
 	closed   bool
 	stopCh   chan struct{}
+	tlsCfg   *tls.Config
 }
 
 func New(upstream, network string, maxIdle int, idleTO time.Duration) *Pool {
@@ -56,7 +58,19 @@ func (p *Pool) Acquire(ctx context.Context) (net.Conn, error) {
 	p.mu.Unlock()
 
 	var d net.Dialer
-	return d.DialContext(ctx, p.network, p.upstream)
+	conn, err := d.DialContext(ctx, p.network, p.upstream)
+	if err != nil {
+		return nil, err
+	}
+	if p.tlsCfg != nil {
+		tlsConn := tls.Client(conn, p.tlsCfg)
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			_ = conn.Close()
+			return nil, err
+		}
+		return tlsConn, nil
+	}
+	return conn, nil
 }
 
 func (p *Pool) Release(conn net.Conn, err error) {
@@ -77,6 +91,12 @@ func (p *Pool) Release(conn net.Conn, err error) {
 		return
 	}
 	p.idle = append(p.idle, idleConn{conn: conn, returned: time.Now()})
+}
+
+func (p *Pool) SetTLSConfig(tc *tls.Config) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.tlsCfg = tc
 }
 
 func (p *Pool) Close() {

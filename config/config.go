@@ -43,6 +43,7 @@ type BlockingHookConfig struct {
 type HookConfig struct {
 	RateLimiting RateLimitHookConfig
 	Blocking     BlockingHookConfig
+	QMinimizer   QMinimizerHookConfig
 }
 
 type UpstreamConfig struct {
@@ -51,6 +52,10 @@ type UpstreamConfig struct {
 	Priority              int
 	Timeout               int // seconds, default 5
 	TCPOnly               bool
+	TLS                   bool    // DNS-over-TLS
+	TLSServerName         string  // SNI override for DoT/DoH/DoQ
+	DoHURL                string  // DNS-over-HTTPS URL (e.g., "https://example.com/dns-query")
+	DoQ                   bool    // DNS-over-QUIC
 	HealthCheck           bool    // default true
 	HealthInterval        int     // seconds, default 30
 	HealthTimeout         int     // seconds, default 5
@@ -62,6 +67,20 @@ type UpstreamConfig struct {
 type ConditionalRouteConfig struct {
 	Domain   string
 	Upstream string
+}
+
+type QMinimizerHookConfig struct {
+	Enabled    bool
+	Priority   int
+	KeepLabels int
+}
+
+type TLSConfig struct {
+	CertFile       string
+	KeyFile        string
+	CAFile         string
+	MinVersion     string // "1.2" or "1.3"
+	AutoSelfSigned bool
 }
 
 type Config struct {
@@ -90,6 +109,13 @@ type Config struct {
 	LogDir               string
 	LogRetention         int
 	TimeZone             string
+	TLS                  TLSConfig
+	DoTEnabled           bool
+	DoTPort              int
+	DoHEnabled           bool
+	DoHPort              int
+	DoQEnabled           bool
+	DoQPort              int
 	CacheWarmup          bool
 	MaxTCPConnsPerClient int
 	MetricsEnable        bool
@@ -107,15 +133,25 @@ func Load() Config {
 	}
 
 	cfg := Config{
-		ConfigPath:           cfgPath,
-		Mode:                 "prod",
-		DNSPort:              53,
-		UpstreamAddr:         "8.8.8.8:53",
-		CacheAddr:            "",
-		CacheFile:            "",
-		Ipv4Disable:          false,
-		Ipv6Disable:          false,
-		TcpDisable:           false,
+		ConfigPath:   cfgPath,
+		Mode:         "prod",
+		DNSPort:      53,
+		UpstreamAddr: "8.8.8.8:53",
+		CacheAddr:    "",
+		CacheFile:    "",
+		Ipv4Disable:  false,
+		Ipv6Disable:  false,
+		TcpDisable:   false,
+		TLS: TLSConfig{
+			MinVersion:     "1.2",
+			AutoSelfSigned: true,
+		},
+		DoTEnabled:           true,
+		DoTPort:              853,
+		DoHEnabled:           true,
+		DoHPort:              443,
+		DoQEnabled:           true,
+		DoQPort:              853,
 		RateLimit:            0,
 		StaleAge:             60,
 		NegativeTTL:          0,
@@ -146,6 +182,11 @@ func Load() Config {
 				BlockAction:  "nxdomain",
 				SinkholeAddr: "127.0.0.1",
 				DomainRPS:    0,
+			},
+			QMinimizer: QMinimizerHookConfig{
+				Enabled:    false,
+				Priority:   300,
+				KeepLabels: 2,
 			},
 		},
 	}
@@ -179,15 +220,25 @@ func Reload() (Config, error) {
 	}
 
 	cfg := Config{
-		ConfigPath:           cfgPath,
-		Mode:                 "prod",
-		DNSPort:              53,
-		UpstreamAddr:         "8.8.8.8:53",
-		CacheAddr:            "",
-		CacheFile:            "",
-		Ipv4Disable:          false,
-		Ipv6Disable:          false,
-		TcpDisable:           false,
+		ConfigPath:   cfgPath,
+		Mode:         "prod",
+		DNSPort:      53,
+		UpstreamAddr: "8.8.8.8:53",
+		CacheAddr:    "",
+		CacheFile:    "",
+		Ipv4Disable:  false,
+		Ipv6Disable:  false,
+		TcpDisable:   false,
+		TLS: TLSConfig{
+			MinVersion:     "1.2",
+			AutoSelfSigned: true,
+		},
+		DoTEnabled:           true,
+		DoTPort:              853,
+		DoHEnabled:           true,
+		DoHPort:              443,
+		DoQEnabled:           true,
+		DoQPort:              853,
 		RateLimit:            0,
 		StaleAge:             60,
 		NegativeTTL:          0,
@@ -219,6 +270,11 @@ func Reload() (Config, error) {
 				BlockAction:  "nxdomain",
 				SinkholeAddr: "127.0.0.1",
 				DomainRPS:    0,
+			},
+			QMinimizer: QMinimizerHookConfig{
+				Enabled:    false,
+				Priority:   300,
+				KeepLabels: 2,
 			},
 		},
 	}
@@ -334,6 +390,39 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v, ok := os.LookupEnv("NORTHSTAR_METRICS_PORT"); ok {
 		cfg.MetricsPort = atoiOrZero(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_TLS_CERT_FILE"); ok {
+		cfg.TLS.CertFile = v
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_TLS_KEY_FILE"); ok {
+		cfg.TLS.KeyFile = v
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_TLS_CA_FILE"); ok {
+		cfg.TLS.CAFile = v
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_TLS_MIN_VERSION"); ok {
+		cfg.TLS.MinVersion = v
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_TLS_AUTO_SELF_SIGNED"); ok {
+		cfg.TLS.AutoSelfSigned = isTrue(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_DOT_ENABLED"); ok {
+		cfg.DoTEnabled = isTrue(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_DOT_PORT"); ok {
+		cfg.DoTPort = atoiOrZero(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_DOH_ENABLED"); ok {
+		cfg.DoHEnabled = isTrue(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_DOH_PORT"); ok {
+		cfg.DoHPort = atoiOrZero(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_DOQ_ENABLED"); ok {
+		cfg.DoQEnabled = isTrue(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_DOQ_PORT"); ok {
+		cfg.DoQPort = atoiOrZero(v)
 	}
 	// ConfigPath override (not from file, directly via env)
 	if v, ok := os.LookupEnv("NORTHSTAR_CONFIG"); ok {

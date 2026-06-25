@@ -26,9 +26,24 @@ type FileBlockingHookConfig struct {
 	RPZ          []FileRPZConfig `yaml:"rpz"`
 }
 
+type FileTLSConfig struct {
+	CertFile       *string `yaml:"cert_file"`
+	KeyFile        *string `yaml:"key_file"`
+	CAFile         *string `yaml:"ca_file"`
+	MinVersion     *string `yaml:"min_version"`
+	AutoSelfSigned *bool   `yaml:"auto_self_signed"`
+}
+
+type FileQMinimizerHookConfig struct {
+	Enabled    *bool `yaml:"enabled"`
+	Priority   *int  `yaml:"priority"`
+	KeepLabels *int  `yaml:"keep_labels"`
+}
+
 type FileHookConfig struct {
-	RateLimiting FileRateLimitHookConfig `yaml:"rate_limiting"`
-	Blocking     *FileBlockingHookConfig `yaml:"blocking"`
+	RateLimiting FileRateLimitHookConfig   `yaml:"rate_limiting"`
+	Blocking     *FileBlockingHookConfig   `yaml:"blocking"`
+	QMinimizer   *FileQMinimizerHookConfig `yaml:"qminimizer"`
 }
 
 type FileRateLimitHookConfig struct {
@@ -44,6 +59,10 @@ type FileUpstreamConfig struct {
 	Priority              *int     `yaml:"priority"`
 	Timeout               *int     `yaml:"timeout"`
 	TCPOnly               *bool    `yaml:"tcp_only"`
+	TLS                   *bool    `yaml:"tls"`
+	TLSServerName         *string  `yaml:"tls_server_name"`
+	DoHURL                *string  `yaml:"doh_url"`
+	DoQ                   *bool    `yaml:"doq"`
 	HealthCheck           *bool    `yaml:"health_check"`
 	HealthInterval        *int     `yaml:"health_interval"`
 	HealthTimeout         *int     `yaml:"health_timeout"`
@@ -86,6 +105,13 @@ type FileConfig struct {
 	MaxTCPConnsPerClient *int                         `yaml:"max_tcp_conns_per_client"`
 	MetricsEnable        *bool                        `yaml:"metrics_enable"`
 	MetricsPort          *int                         `yaml:"metrics_port"`
+	DoTEnabled           *bool                        `yaml:"dot_enabled"`
+	DoTPort              *int                         `yaml:"dot_port"`
+	DoHEnabled           *bool                        `yaml:"doh_enabled"`
+	DoHPort              *int                         `yaml:"doh_port"`
+	DoQEnabled           *bool                        `yaml:"doq_enabled"`
+	DoQPort              *int                         `yaml:"doq_port"`
+	TLS                  *FileTLSConfig               `yaml:"tls"`
 	Hooks                *FileHookConfig              `yaml:"hooks"`
 }
 
@@ -116,6 +142,18 @@ func applyFileUpstream(dst *UpstreamConfig, src *FileUpstreamConfig) {
 	}
 	if src.TCPOnly != nil {
 		dst.TCPOnly = *src.TCPOnly
+	}
+	if src.TLS != nil {
+		dst.TLS = *src.TLS
+	}
+	if src.TLSServerName != nil {
+		dst.TLSServerName = *src.TLSServerName
+	}
+	if src.DoHURL != nil {
+		dst.DoHURL = *src.DoHURL
+	}
+	if src.DoQ != nil {
+		dst.DoQ = *src.DoQ
 	}
 	if src.HealthCheck != nil {
 		dst.HealthCheck = *src.HealthCheck
@@ -153,6 +191,18 @@ func fileUpstreamToConfig(src *FileUpstreamConfig) UpstreamConfig {
 	}
 	if src.TCPOnly != nil {
 		dst.TCPOnly = *src.TCPOnly
+	}
+	if src.TLS != nil {
+		dst.TLS = *src.TLS
+	}
+	if src.TLSServerName != nil {
+		dst.TLSServerName = *src.TLSServerName
+	}
+	if src.DoHURL != nil {
+		dst.DoHURL = *src.DoHURL
+	}
+	if src.DoQ != nil {
+		dst.DoQ = *src.DoQ
 	}
 	if src.HealthCheck != nil {
 		dst.HealthCheck = *src.HealthCheck
@@ -271,6 +321,41 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 	if fc.MetricsPort != nil {
 		cfg.MetricsPort = *fc.MetricsPort
 	}
+	if fc.DoTEnabled != nil {
+		cfg.DoTEnabled = *fc.DoTEnabled
+	}
+	if fc.DoTPort != nil {
+		cfg.DoTPort = *fc.DoTPort
+	}
+	if fc.DoHEnabled != nil {
+		cfg.DoHEnabled = *fc.DoHEnabled
+	}
+	if fc.DoHPort != nil {
+		cfg.DoHPort = *fc.DoHPort
+	}
+	if fc.DoQEnabled != nil {
+		cfg.DoQEnabled = *fc.DoQEnabled
+	}
+	if fc.DoQPort != nil {
+		cfg.DoQPort = *fc.DoQPort
+	}
+	if fc.TLS != nil {
+		if fc.TLS.CertFile != nil {
+			cfg.TLS.CertFile = *fc.TLS.CertFile
+		}
+		if fc.TLS.KeyFile != nil {
+			cfg.TLS.KeyFile = *fc.TLS.KeyFile
+		}
+		if fc.TLS.CAFile != nil {
+			cfg.TLS.CAFile = *fc.TLS.CAFile
+		}
+		if fc.TLS.MinVersion != nil {
+			cfg.TLS.MinVersion = *fc.TLS.MinVersion
+		}
+		if fc.TLS.AutoSelfSigned != nil {
+			cfg.TLS.AutoSelfSigned = *fc.TLS.AutoSelfSigned
+		}
+	}
 	if fc.Hooks != nil {
 		if fc.Hooks.RateLimiting.Enabled != nil {
 			cfg.Hooks.RateLimiting.Enabled = *fc.Hooks.RateLimiting.Enabled
@@ -283,6 +368,17 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 		}
 		if fc.Hooks.RateLimiting.Action != nil {
 			cfg.Hooks.RateLimiting.Action = *fc.Hooks.RateLimiting.Action
+		}
+		if fc.Hooks.QMinimizer != nil {
+			if fc.Hooks.QMinimizer.Enabled != nil {
+				cfg.Hooks.QMinimizer.Enabled = *fc.Hooks.QMinimizer.Enabled
+			}
+			if fc.Hooks.QMinimizer.Priority != nil {
+				cfg.Hooks.QMinimizer.Priority = *fc.Hooks.QMinimizer.Priority
+			}
+			if fc.Hooks.QMinimizer.KeepLabels != nil {
+				cfg.Hooks.QMinimizer.KeepLabels = *fc.Hooks.QMinimizer.KeepLabels
+			}
 		}
 		if fc.Hooks.Blocking != nil {
 			if fc.Hooks.Blocking.Enabled != nil {
@@ -330,6 +426,7 @@ func configToFile(cfg *Config) *FileConfig {
 	ipv4Disable := cfg.Ipv4Disable
 	ipv6Disable := cfg.Ipv6Disable
 	tcpDisable := cfg.TcpDisable
+	tls := cfg.TLS
 	rateLimit := cfg.RateLimit
 	staleAge := cfg.StaleAge
 	negativeTTL := cfg.NegativeTTL
@@ -348,6 +445,12 @@ func configToFile(cfg *Config) *FileConfig {
 	maxTCPConnsPerClient := cfg.MaxTCPConnsPerClient
 	metricsEnable := cfg.MetricsEnable
 	metricsPort := cfg.MetricsPort
+	dotEnabled := cfg.DoTEnabled
+	dotPort := cfg.DoTPort
+	dohEnabled := cfg.DoHEnabled
+	dohPort := cfg.DoHPort
+	doqEnabled := cfg.DoQEnabled
+	doqPort := cfg.DoQPort
 	hookEnabled := cfg.Hooks.RateLimiting.Enabled
 	hookPriority := cfg.Hooks.RateLimiting.Priority
 	hookRate := cfg.Hooks.RateLimiting.Rate
@@ -360,6 +463,10 @@ func configToFile(cfg *Config) *FileConfig {
 	blockingLists := cfg.Hooks.Blocking.Blocklists
 	blockingAllowlists := cfg.Hooks.Blocking.Allowlists
 	blockingDomainRPS := cfg.Hooks.Blocking.DomainRPS
+
+	qminEnabled := cfg.Hooks.QMinimizer.Enabled
+	qminPriority := cfg.Hooks.QMinimizer.Priority
+	qminKeepLabels := cfg.Hooks.QMinimizer.KeepLabels
 
 	var fileUpstreams []FileUpstreamConfig
 	for _, u := range cfg.Upstreams {
@@ -410,17 +517,30 @@ func configToFile(cfg *Config) *FileConfig {
 	}
 
 	return &FileConfig{
-		Mode:                 &mode,
-		DNSPort:              &dnsPort,
-		UpstreamAddr:         &upstream,
-		Upstreams:            fileUpstreams,
-		ConditionalRoutes:    fileRoutes,
-		UpstreamConcurrency:  &upstreamConcurrency,
-		CacheAddr:            &cacheAddr,
-		CacheFile:            &cacheFile,
-		Ipv4Disable:          &ipv4Disable,
-		Ipv6Disable:          &ipv6Disable,
-		TcpDisable:           &tcpDisable,
+		Mode:                &mode,
+		DNSPort:             &dnsPort,
+		UpstreamAddr:        &upstream,
+		Upstreams:           fileUpstreams,
+		ConditionalRoutes:   fileRoutes,
+		UpstreamConcurrency: &upstreamConcurrency,
+		CacheAddr:           &cacheAddr,
+		CacheFile:           &cacheFile,
+		Ipv4Disable:         &ipv4Disable,
+		Ipv6Disable:         &ipv6Disable,
+		TcpDisable:          &tcpDisable,
+		DoTEnabled:          &dotEnabled,
+		DoTPort:             &dotPort,
+		DoHEnabled:          &dohEnabled,
+		DoHPort:             &dohPort,
+		DoQEnabled:          &doqEnabled,
+		DoQPort:             &doqPort,
+		TLS: &FileTLSConfig{
+			CertFile:       &tls.CertFile,
+			KeyFile:        &tls.KeyFile,
+			CAFile:         &tls.CAFile,
+			MinVersion:     &tls.MinVersion,
+			AutoSelfSigned: &tls.AutoSelfSigned,
+		},
 		RateLimit:            &rateLimit,
 		StaleAge:             &staleAge,
 		NegativeTTL:          &negativeTTL,
@@ -454,6 +574,11 @@ func configToFile(cfg *Config) *FileConfig {
 				Allowlists:   blockingAllowlists,
 				DomainRPS:    &blockingDomainRPS,
 				RPZ:          fileRPZ,
+			},
+			QMinimizer: &FileQMinimizerHookConfig{
+				Enabled:    &qminEnabled,
+				Priority:   &qminPriority,
+				KeepLabels: &qminKeepLabels,
 			},
 		},
 	}
@@ -494,6 +619,11 @@ func WriteDefaultConfig(path string) error {
 	ipv4Disable := false
 	ipv6Disable := false
 	tcpDisable := false
+	certFile := ""
+	keyFile := ""
+	caFile := ""
+	tlsMinVer := "1.2"
+	autoSelfSigned := true
 	rateLimit := 0
 	staleAge := 60
 	negativeTTL := 0
@@ -512,6 +642,12 @@ func WriteDefaultConfig(path string) error {
 	maxTCPConnsPerClient := 0
 	metricsEnable := false
 	metricsPort := 9153
+	dotEnabled := true
+	dotPort := 853
+	dohEnabled := true
+	dohPort := 443
+	doqEnabled := true
+	doqPort := 853
 	hookEnabled := false
 	hookPriority := 100
 	hookRate := 0
@@ -521,6 +657,9 @@ func WriteDefaultConfig(path string) error {
 	blockingAction := "nxdomain"
 	blockingSinkhole := "127.0.0.1"
 	blockingDomainRPS := 0
+	qminEnabled := false
+	qminPriority := 300
+	qminKeepLabels := 2
 
 	name := "default"
 	addr := "8.8.8.8:53"
@@ -551,12 +690,25 @@ func WriteDefaultConfig(path string) error {
 			Weight:                &weight,
 			AdaptiveTimeoutFactor: &adaptiveFactor,
 		}},
-		UpstreamConcurrency:  &upstreamConcurrency,
-		CacheAddr:            &cacheAddr,
-		CacheFile:            &cacheFile,
-		Ipv4Disable:          &ipv4Disable,
-		Ipv6Disable:          &ipv6Disable,
-		TcpDisable:           &tcpDisable,
+		UpstreamConcurrency: &upstreamConcurrency,
+		CacheAddr:           &cacheAddr,
+		CacheFile:           &cacheFile,
+		Ipv4Disable:         &ipv4Disable,
+		Ipv6Disable:         &ipv6Disable,
+		TcpDisable:          &tcpDisable,
+		DoTEnabled:          &dotEnabled,
+		DoTPort:             &dotPort,
+		DoHEnabled:          &dohEnabled,
+		DoHPort:             &dohPort,
+		DoQEnabled:          &doqEnabled,
+		DoQPort:             &doqPort,
+		TLS: &FileTLSConfig{
+			CertFile:       &certFile,
+			KeyFile:        &keyFile,
+			CAFile:         &caFile,
+			MinVersion:     &tlsMinVer,
+			AutoSelfSigned: &autoSelfSigned,
+		},
 		RateLimit:            &rateLimit,
 		StaleAge:             &staleAge,
 		NegativeTTL:          &negativeTTL,
@@ -587,6 +739,11 @@ func WriteDefaultConfig(path string) error {
 				BlockAction:  &blockingAction,
 				SinkholeAddr: &blockingSinkhole,
 				DomainRPS:    &blockingDomainRPS,
+			},
+			QMinimizer: &FileQMinimizerHookConfig{
+				Enabled:    &qminEnabled,
+				Priority:   &qminPriority,
+				KeepLabels: &qminKeepLabels,
 			},
 		},
 	}

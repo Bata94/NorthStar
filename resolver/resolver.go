@@ -459,6 +459,38 @@ func fetchFromUpstream(ctx context.Context, domain string, qtype uint16, maxPayl
 	}
 	query := msg.Pack()
 
+	if u.DoQ != nil {
+		reply, err := u.DoQ.Query(ctx, &msg)
+		if err != nil {
+			return nil, err
+		}
+		u.RecordLatency(time.Since(start))
+		u.ReportSuccess()
+		m.UpstreamQueries.WithLabelValues(u.Name).Inc()
+		rcode := reply.Header.Flags & 0x000F
+		entry := cache.NewEntry(domain, qtype, rcode, reply.Answers, reply.Authorities, stripOPT(reply.Additionals), ttlMin, ttlMax, negativeTTL)
+		entry.Flags = reply.Header.Flags
+		entry.RCode = reply.Header.Flags & 0x000F
+		entry.AuthenticData = reply.Header.Flags&0x0020 != 0
+		return entry, nil
+	}
+
+	if u.DoH != nil {
+		reply, err := u.DoH.Query(ctx, &msg)
+		if err != nil {
+			return nil, err
+		}
+		u.RecordLatency(time.Since(start))
+		u.ReportSuccess()
+		m.UpstreamQueries.WithLabelValues(u.Name).Inc()
+		rcode := reply.Header.Flags & 0x000F
+		entry := cache.NewEntry(domain, qtype, rcode, reply.Answers, reply.Authorities, stripOPT(reply.Additionals), ttlMin, ttlMax, negativeTTL)
+		entry.Flags = reply.Header.Flags
+		entry.RCode = reply.Header.Flags & 0x000F
+		entry.AuthenticData = reply.Header.Flags&0x0020 != 0
+		return entry, nil
+	}
+
 	var pool *Pool
 	if network == "tcp" || u.Config.TCPOnly {
 		pool = u.TCPPool

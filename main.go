@@ -18,6 +18,7 @@ import (
 	"github.com/bata94/northstar/log"
 	"github.com/bata94/northstar/metrics"
 	"github.com/bata94/northstar/resolver"
+	"github.com/bata94/northstar/tls"
 	"github.com/bata94/northstar/upstream"
 )
 
@@ -142,6 +143,41 @@ func main() {
 	upstreamGroup.StartHealthChecks(ctx, m)
 	upstreamGroup.StartSpeedAssessment(ctx)
 
+	if cfg.DoTEnabled || cfg.DoHEnabled || cfg.DoQEnabled {
+		tlsCfg, err := tls.ServerConfig(cfg.TLS)
+		if err != nil {
+			slog.Error("Failed to create TLS config for encrypted DNS", "error", err)
+		} else {
+			if cfg.DoHEnabled {
+				dohAddr := fmt.Sprintf(":%d", cfg.DoHPort)
+				go func() {
+					if err := resolver.ServeDOH(ctx, dohAddr, tlsCfg, upstreamGroup, backend, runtimeCfg, m); err != nil {
+						slog.Error("DoH server error", "error", err)
+					}
+				}()
+				slog.Warn("DoH server starting", "addr", dohAddr)
+			}
+			if cfg.DoTEnabled {
+				dotAddr := fmt.Sprintf(":%d", cfg.DoTPort)
+				go func() {
+					if err := resolver.ServeDOT(ctx, dotAddr, tlsCfg, upstreamGroup, backend, runtimeCfg, m); err != nil {
+						slog.Error("DoT server error", "error", err)
+					}
+				}()
+				slog.Warn("DoT server starting", "addr", dotAddr)
+			}
+			if cfg.DoQEnabled {
+				doqAddr := fmt.Sprintf(":%d", cfg.DoQPort)
+				go func() {
+					if err := resolver.ServeDOQ(ctx, doqAddr, tlsCfg, upstreamGroup, backend, runtimeCfg, m); err != nil {
+						slog.Error("DoQ server error", "error", err)
+					}
+				}()
+				slog.Warn("DoQ server starting", "addr", doqAddr)
+			}
+		}
+	}
+
 	errCap := len(cfg.Listeners)
 	if !cfg.TcpDisable {
 		errCap *= 2
@@ -260,6 +296,13 @@ func buildHooks(cfg *config.Config, c cache.Cache, m *metrics.Metrics) []hooks.H
 			slog.Info("Blocking hook created", "blocklists", blockCfg.Blocklists, "allowlists", blockCfg.Allowlists, "action", blockCfg.BlockAction)
 			result = append(result, hook)
 		}
+	}
+
+	qminCfg := cfg.Hooks.QMinimizer
+	if qminCfg.Enabled {
+		pre, post := hooks.NewQMinimizerHooks(true, qminCfg.Priority, qminCfg.Priority+1, qminCfg.KeepLabels)
+		result = append(result, pre, post)
+		slog.Info("QNAME minimization enabled", "keep_labels", qminCfg.KeepLabels)
 	}
 
 	return result

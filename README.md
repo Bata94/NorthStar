@@ -124,6 +124,47 @@ docker compose up northstar-dev
 
 Source changes trigger an automatic rebuild and restart inside the container.
 
+## Reverse Proxy
+
+Run northstar behind a TLS-terminating reverse proxy (Caddy, Traefik, nginx) for encrypted client connections without configuring TLS in northstar itself.
+
+### Caddy
+
+```caddyfile
+dns.example.com {
+    tls your@email.com
+    reverse_proxy 127.0.0.1:8053 {
+        transport http {
+            dial_timeout 5s
+            response_header_timeout 30s
+        }
+    }
+}
+```
+
+For DNS-over-TLS:
+```caddyfile
+dot.example.com:853 {
+    tls your@email.com
+    reverse_proxy 127.0.0.1:8053
+}
+```
+
+### nginx (stream)
+
+```nginx
+stream {
+    server {
+        listen 853 ssl;
+        proxy_pass 127.0.0.1:8053;
+        ssl_certificate /etc/certs/cert.pem;
+        ssl_certificate_key /etc/certs/key.pem;
+    }
+}
+```
+
+Note: northstar runs with `NET_BIND_SERVICE` capability inside Docker for ports below 1024.
+
 ## Dependencies
 
 - [godotenv](https://github.com/joho/godotenv) — `.env` file loading
