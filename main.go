@@ -229,5 +229,38 @@ func buildHooks(cfg *config.Config, c cache.Cache, m *metrics.Metrics) []hooks.H
 		rateCfg.Enabled,
 	))
 
+	blockCfg := cfg.Hooks.Blocking
+	if blockCfg.Enabled {
+		rpzConfigs := make([]struct{ Path, Action string }, len(blockCfg.RPZ))
+		for i, r := range blockCfg.RPZ {
+			rpzConfigs[i] = struct{ Path, Action string }{r.Path, r.Action}
+		}
+		hook, err := hooks.NewBlockingHook(struct {
+			Enabled      bool
+			Priority     int
+			BlockAction  string
+			SinkholeAddr string
+			Blocklists   []string
+			Allowlists   []string
+			DomainRPS    int
+			RPZ          []struct{ Path, Action string }
+		}{
+			Enabled:      blockCfg.Enabled,
+			Priority:     blockCfg.Priority,
+			BlockAction:  blockCfg.BlockAction,
+			SinkholeAddr: blockCfg.SinkholeAddr,
+			Blocklists:   blockCfg.Blocklists,
+			Allowlists:   blockCfg.Allowlists,
+			DomainRPS:    blockCfg.DomainRPS,
+			RPZ:          rpzConfigs,
+		}, m)
+		if err != nil {
+			slog.Error("Failed to create blocking hook", "error", err)
+		} else {
+			slog.Info("Blocking hook created", "blocklists", blockCfg.Blocklists, "allowlists", blockCfg.Allowlists, "action", blockCfg.BlockAction)
+			result = append(result, hook)
+		}
+	}
+
 	return result
 }

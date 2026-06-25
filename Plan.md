@@ -46,18 +46,18 @@
 
 ## Blocking & Filtering
 
-- Blocklists — file-based, one domain per line, wildcard/glob support
+- [X] Blocklists — file-based, one domain per line, wildcard/glob support
   (`*.example.com`)
-- Allowlists — takes precedence over blocklists
-- Configurable block action — NXDOMAIN / 0.0.0.0 sinkhole / REFUSED /
+- [X] Allowlists — takes precedence over blocklists
+- [X] Configurable block action — NXDOMAIN / 127.0.0.1 sinkhole / REFUSED /
   drop silently
-- Hot-reload blocklist/allowlist files — inotify-based reload without
+- [X] Hot-reload blocklist/allowlist files — SIGHUP-based reload without
   restart
-- Response Policy Zones (RPZ) — more sophisticated blocking via
+- [X] Response Policy Zones (RPZ) — more sophisticated blocking via
   policy zone files (compatible with common RPZ feeds)
-- Blocklist format compatibility — optionally consume AdGuard Home and
+- [X] Blocklist format compatibility — optionally consume AdGuard Home and
   Pi-hole list formats
-- Per-domain rate limiting — limit queries to specific domains (e.g.,
+- [X] Per-domain rate limiting — limit queries to specific domains (e.g.,
   high-cardinality subdomains used in DDoS amplification)
 
 ## Low RAM Mode
@@ -219,13 +219,13 @@ forwarding, and intelligent routing.
 
 **Goal:** DNS-level content filtering with flexible policy.
 
-- [ ] Blocklists (file-based, wildcard support)
-- [ ] Allowlists (takes precedence)
-- [ ] Configurable block action (NXDOMAIN / sinkhole / REFUSED / drop)
-- [ ] Hot-reload blocklist/allowlist files (inotify)
-- [ ] Response Policy Zones (RPZ)
-- [ ] Per-domain rate limiting
-- [ ] Blocklist format compatibility (AdGuard Home, Pi-hole)
+- [X] Blocklists (file-based, wildcard support)
+- [X] Allowlists (takes precedence)
+- [X] Configurable block action (NXDOMAIN / sinkhole / REFUSED / drop)
+- [X] Hot-reload blocklist/allowlist files (SIGHUP)
+- [X] Response Policy Zones (RPZ)
+- [X] Per-domain rate limiting
+- [X] Blocklist format compatibility (AdGuard Home, Pi-hole)
 
 **Depends on:** Phase 1 (config file, hooks pipeline)
 

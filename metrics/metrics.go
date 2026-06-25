@@ -11,19 +11,20 @@ import (
 )
 
 type Metrics struct {
-	QueriesTotal              *prometheus.CounterVec
-	CacheLookups              prometheus.Counter
-	CacheHits                 prometheus.Counter
-	UpstreamLatency           *prometheus.HistogramVec
-	ErrorsTotal               *prometheus.CounterVec
-	ActiveHandlers            prometheus.Gauge
-	UpstreamHealthy           *prometheus.GaugeVec
-	UpstreamFails             *prometheus.CounterVec
-	UpstreamProbeDuration     *prometheus.HistogramVec
-	UpstreamQueries           *prometheus.CounterVec
-	UpstreamConcurrentWins    *prometheus.CounterVec
-	UpstreamConditionalHits   *prometheus.CounterVec
-	Registry                  *prometheus.Registry
+	QueriesTotal            *prometheus.CounterVec
+	CacheLookups            prometheus.Counter
+	CacheHits               prometheus.Counter
+	UpstreamLatency         *prometheus.HistogramVec
+	ErrorsTotal             *prometheus.CounterVec
+	ActiveHandlers          prometheus.Gauge
+	UpstreamHealthy         *prometheus.GaugeVec
+	UpstreamFails           *prometheus.CounterVec
+	UpstreamProbeDuration   *prometheus.HistogramVec
+	UpstreamQueries         *prometheus.CounterVec
+	UpstreamConcurrentWins  *prometheus.CounterVec
+	UpstreamConditionalHits *prometheus.CounterVec
+	BlockedTotal            *prometheus.CounterVec
+	Registry                *prometheus.Registry
 }
 
 func New() *Metrics {
@@ -127,6 +128,14 @@ func New() *Metrics {
 		Help:      "Conditional route matches per upstream.",
 	}, []string{"name", "pattern"})
 	reg.MustRegister(m.UpstreamConditionalHits)
+
+	m.BlockedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "northstar",
+		Subsystem: "filter",
+		Name:      "blocked_total",
+		Help:      "Total queries blocked by action and qtype.",
+	}, []string{"action", "qtype"})
+	reg.MustRegister(m.BlockedTotal)
 
 	return m
 }

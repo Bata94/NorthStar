@@ -24,21 +24,38 @@ type RateLimitHookConfig struct {
 	Action   string
 }
 
+type RPZConfig struct {
+	Path   string
+	Action string // nxdomain, sinkhole, passthru, drop
+}
+
+type BlockingHookConfig struct {
+	Enabled      bool
+	Priority     int
+	BlockAction  string   // nxdomain, sinkhole, refused, drop
+	SinkholeAddr string   // default "127.0.0.1"
+	Blocklists   []string // file paths
+	Allowlists   []string // file paths
+	DomainRPS    int      // per-domain rate limit (0 = disabled)
+	RPZ          []RPZConfig
+}
+
 type HookConfig struct {
 	RateLimiting RateLimitHookConfig
+	Blocking     BlockingHookConfig
 }
 
 type UpstreamConfig struct {
-	Name                string
-	Address             string
-	Priority            int
-	Timeout             int     // seconds, default 5
-	TCPOnly             bool
-	HealthCheck         bool    // default true
-	HealthInterval      int     // seconds, default 30
-	HealthTimeout       int     // seconds, default 5
-	MaxFails            int     // default 3
-	Weight              int     // default 1
+	Name                  string
+	Address               string
+	Priority              int
+	Timeout               int // seconds, default 5
+	TCPOnly               bool
+	HealthCheck           bool    // default true
+	HealthInterval        int     // seconds, default 30
+	HealthTimeout         int     // seconds, default 5
+	MaxFails              int     // default 3
+	Weight                int     // default 1
 	AdaptiveTimeoutFactor float64 // multiplier for EWMA latency; 0 = disabled
 }
 
@@ -48,37 +65,37 @@ type ConditionalRouteConfig struct {
 }
 
 type Config struct {
-	Mode                string
-	DNSPort             int
-	UpstreamAddr        string // deprecated, use Upstreams
-	Upstreams           []UpstreamConfig
-	ConditionalRoutes   []ConditionalRouteConfig
-	UpstreamConcurrency int // number of upstreams to query in parallel (0/1 = disabled)
-	CacheAddr           string
-	CacheFile           string
-	Listeners           []Listener
-	Ipv4Disable         bool
-	Ipv6Disable         bool
-	TcpDisable          bool
-	RateLimit           int
-	StaleAge            int
-	NegativeTTL         int
-	TTLMin              int
-	TTLMax              int
-	CacheMaxEntries     int
-	UpstreamPoolSize    int
-	UpstreamPoolIdle    int
-	LogLevel            string
-	LogMode             string
-	LogDir              string
-	LogRetention        int
-	TimeZone            string
-	CacheWarmup             bool
-	MaxTCPConnsPerClient    int
-	MetricsEnable           bool
-	MetricsPort             int
-	ConfigPath          string
-	Hooks               HookConfig
+	Mode                 string
+	DNSPort              int
+	UpstreamAddr         string // deprecated, use Upstreams
+	Upstreams            []UpstreamConfig
+	ConditionalRoutes    []ConditionalRouteConfig
+	UpstreamConcurrency  int // number of upstreams to query in parallel (0/1 = disabled)
+	CacheAddr            string
+	CacheFile            string
+	Listeners            []Listener
+	Ipv4Disable          bool
+	Ipv6Disable          bool
+	TcpDisable           bool
+	RateLimit            int
+	StaleAge             int
+	NegativeTTL          int
+	TTLMin               int
+	TTLMax               int
+	CacheMaxEntries      int
+	UpstreamPoolSize     int
+	UpstreamPoolIdle     int
+	LogLevel             string
+	LogMode              string
+	LogDir               string
+	LogRetention         int
+	TimeZone             string
+	CacheWarmup          bool
+	MaxTCPConnsPerClient int
+	MetricsEnable        bool
+	MetricsPort          int
+	ConfigPath           string
+	Hooks                HookConfig
 }
 
 func Load() Config {
@@ -90,28 +107,28 @@ func Load() Config {
 	}
 
 	cfg := Config{
-		ConfigPath:       cfgPath,
-		Mode:             "prod",
-		DNSPort:          53,
-		UpstreamAddr:     "8.8.8.8:53",
-		CacheAddr:        "",
-		CacheFile:        "",
-		Ipv4Disable:      false,
-		Ipv6Disable:      false,
-		TcpDisable:       false,
-		RateLimit:        0,
-		StaleAge:         60,
-		NegativeTTL:      0,
-		TTLMin:           0,
-		TTLMax:           0,
-		CacheMaxEntries:  0,
-		UpstreamPoolSize: 10,
-		UpstreamPoolIdle: 30,
-		LogLevel:         "",
-		LogMode:          "",
-		LogDir:           ".",
-		LogRetention:     7,
-		TimeZone:         "",
+		ConfigPath:           cfgPath,
+		Mode:                 "prod",
+		DNSPort:              53,
+		UpstreamAddr:         "8.8.8.8:53",
+		CacheAddr:            "",
+		CacheFile:            "",
+		Ipv4Disable:          false,
+		Ipv6Disable:          false,
+		TcpDisable:           false,
+		RateLimit:            0,
+		StaleAge:             60,
+		NegativeTTL:          0,
+		TTLMin:               0,
+		TTLMax:               0,
+		CacheMaxEntries:      0,
+		UpstreamPoolSize:     10,
+		UpstreamPoolIdle:     30,
+		LogLevel:             "",
+		LogMode:              "",
+		LogDir:               ".",
+		LogRetention:         7,
+		TimeZone:             "",
 		CacheWarmup:          false,
 		MaxTCPConnsPerClient: 0,
 		MetricsEnable:        false,
@@ -122,6 +139,13 @@ func Load() Config {
 				Priority: 100,
 				Rate:     0,
 				Action:   "servfail",
+			},
+			Blocking: BlockingHookConfig{
+				Enabled:      false,
+				Priority:     200,
+				BlockAction:  "nxdomain",
+				SinkholeAddr: "127.0.0.1",
+				DomainRPS:    0,
 			},
 		},
 	}
@@ -155,39 +179,46 @@ func Reload() (Config, error) {
 	}
 
 	cfg := Config{
-		ConfigPath:          cfgPath,
-		Mode:                "prod",
-		DNSPort:             53,
-		UpstreamAddr:        "8.8.8.8:53",
-		CacheAddr:           "",
-		CacheFile:           "",
-		Ipv4Disable:         false,
-		Ipv6Disable:         false,
-		TcpDisable:          false,
-		RateLimit:           0,
-		StaleAge:            60,
-		NegativeTTL:         0,
-		TTLMin:              0,
-		TTLMax:              0,
-		CacheMaxEntries:     0,
-		UpstreamPoolSize:    10,
-		UpstreamPoolIdle:    30,
-		UpstreamConcurrency: 1,
-		LogLevel:            "",
-		LogMode:             "",
-		LogDir:              ".",
-		LogRetention:        7,
-		TimeZone:            "",
-		CacheWarmup:             false,
-		MaxTCPConnsPerClient:    0,
-		MetricsEnable:           false,
-		MetricsPort:             9153,
+		ConfigPath:           cfgPath,
+		Mode:                 "prod",
+		DNSPort:              53,
+		UpstreamAddr:         "8.8.8.8:53",
+		CacheAddr:            "",
+		CacheFile:            "",
+		Ipv4Disable:          false,
+		Ipv6Disable:          false,
+		TcpDisable:           false,
+		RateLimit:            0,
+		StaleAge:             60,
+		NegativeTTL:          0,
+		TTLMin:               0,
+		TTLMax:               0,
+		CacheMaxEntries:      0,
+		UpstreamPoolSize:     10,
+		UpstreamPoolIdle:     30,
+		UpstreamConcurrency:  1,
+		LogLevel:             "",
+		LogMode:              "",
+		LogDir:               ".",
+		LogRetention:         7,
+		TimeZone:             "",
+		CacheWarmup:          false,
+		MaxTCPConnsPerClient: 0,
+		MetricsEnable:        false,
+		MetricsPort:          9153,
 		Hooks: HookConfig{
 			RateLimiting: RateLimitHookConfig{
 				Enabled:  false,
 				Priority: 100,
 				Rate:     0,
 				Action:   "servfail",
+			},
+			Blocking: BlockingHookConfig{
+				Enabled:      false,
+				Priority:     200,
+				BlockAction:  "nxdomain",
+				SinkholeAddr: "127.0.0.1",
+				DomainRPS:    0,
 			},
 		},
 	}

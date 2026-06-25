@@ -25,6 +25,7 @@ const (
 var (
 	ErrHookStop    = errors.New("hook: stop pipeline")
 	ErrRateLimited = errors.New("rate limit exceeded")
+	ErrBlocked     = errors.New("query blocked")
 )
 
 type Context struct {

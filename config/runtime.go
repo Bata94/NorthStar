@@ -13,8 +13,8 @@ type RuntimeConfig struct {
 	NegativeTTL atomic.Int64
 	TTLMin      atomic.Int64
 	TTLMax      atomic.Int64
-	LogLevel  atomic.Value
-	LogMode   atomic.Value
+	LogLevel    atomic.Value
+	LogMode     atomic.Value
 }
 
 func NewRuntimeConfig(cfg *Config) *RuntimeConfig {

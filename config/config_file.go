@@ -10,8 +10,25 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+type FileRPZConfig struct {
+	Path   *string `yaml:"path"`
+	Action *string `yaml:"action"`
+}
+
+type FileBlockingHookConfig struct {
+	Enabled      *bool           `yaml:"enabled"`
+	Priority     *int            `yaml:"priority"`
+	BlockAction  *string         `yaml:"block_action"`
+	SinkholeAddr *string         `yaml:"sinkhole_addr"`
+	Blocklists   []string        `yaml:"blocklists"`
+	Allowlists   []string        `yaml:"allowlists"`
+	DomainRPS    *int            `yaml:"domain_rps"`
+	RPZ          []FileRPZConfig `yaml:"rpz"`
+}
+
 type FileHookConfig struct {
 	RateLimiting FileRateLimitHookConfig `yaml:"rate_limiting"`
+	Blocking     *FileBlockingHookConfig `yaml:"blocking"`
 }
 
 type FileRateLimitHookConfig struct {
@@ -22,16 +39,16 @@ type FileRateLimitHookConfig struct {
 }
 
 type FileUpstreamConfig struct {
-	Name                *string  `yaml:"name"`
-	Address             *string  `yaml:"address"`
-	Priority            *int     `yaml:"priority"`
-	Timeout             *int     `yaml:"timeout"`
-	TCPOnly             *bool    `yaml:"tcp_only"`
-	HealthCheck         *bool    `yaml:"health_check"`
-	HealthInterval      *int     `yaml:"health_interval"`
-	HealthTimeout       *int     `yaml:"health_timeout"`
-	MaxFails            *int     `yaml:"max_fails"`
-	Weight              *int     `yaml:"weight"`
+	Name                  *string  `yaml:"name"`
+	Address               *string  `yaml:"address"`
+	Priority              *int     `yaml:"priority"`
+	Timeout               *int     `yaml:"timeout"`
+	TCPOnly               *bool    `yaml:"tcp_only"`
+	HealthCheck           *bool    `yaml:"health_check"`
+	HealthInterval        *int     `yaml:"health_interval"`
+	HealthTimeout         *int     `yaml:"health_timeout"`
+	MaxFails              *int     `yaml:"max_fails"`
+	Weight                *int     `yaml:"weight"`
 	AdaptiveTimeoutFactor *float64 `yaml:"adaptive_timeout_factor"`
 }
 
@@ -41,31 +58,31 @@ type FileConditionalRouteConfig struct {
 }
 
 type FileConfig struct {
-	Mode                *string                      `yaml:"mode"`
-	DNSPort             *int                         `yaml:"dns_port"`
-	UpstreamAddr        *string                      `yaml:"upstream"`
-	Upstreams           []FileUpstreamConfig          `yaml:"upstreams"`
-	ConditionalRoutes   []FileConditionalRouteConfig  `yaml:"conditional_routes"`
-	UpstreamConcurrency *int                         `yaml:"upstream_concurrency"`
-	CacheAddr           *string                      `yaml:"cache_addr"`
-	CacheFile           *string                      `yaml:"cache_file"`
-	Ipv4Disable         *bool                        `yaml:"ipv4_disable"`
-	Ipv6Disable         *bool                        `yaml:"ipv6_disable"`
-	TcpDisable          *bool                        `yaml:"tcp_disable"`
-	RateLimit           *int                         `yaml:"rate_limit"`
-	StaleAge            *int                         `yaml:"stale_age"`
-	NegativeTTL         *int                         `yaml:"negative_ttl"`
-	CacheWarmup         *bool                        `yaml:"cache_warmup"`
-	CacheMaxEntries     *int                         `yaml:"cache_max_entries"`
-	TTLMin              *int                         `yaml:"ttl_min"`
-	TTLMax              *int                         `yaml:"ttl_max"`
-	UpstreamPoolSize    *int                         `yaml:"upstream_pool_size"`
-	UpstreamPoolIdle    *int                         `yaml:"upstream_pool_idle"`
-	LogLevel            *string                      `yaml:"log_level"`
-	LogMode             *string                      `yaml:"log_mode"`
-	LogDir              *string                      `yaml:"log_dir"`
-	LogRetention        *int                         `yaml:"log_retention"`
-	TimeZone            *string                      `yaml:"timezone"`
+	Mode                 *string                      `yaml:"mode"`
+	DNSPort              *int                         `yaml:"dns_port"`
+	UpstreamAddr         *string                      `yaml:"upstream"`
+	Upstreams            []FileUpstreamConfig         `yaml:"upstreams"`
+	ConditionalRoutes    []FileConditionalRouteConfig `yaml:"conditional_routes"`
+	UpstreamConcurrency  *int                         `yaml:"upstream_concurrency"`
+	CacheAddr            *string                      `yaml:"cache_addr"`
+	CacheFile            *string                      `yaml:"cache_file"`
+	Ipv4Disable          *bool                        `yaml:"ipv4_disable"`
+	Ipv6Disable          *bool                        `yaml:"ipv6_disable"`
+	TcpDisable           *bool                        `yaml:"tcp_disable"`
+	RateLimit            *int                         `yaml:"rate_limit"`
+	StaleAge             *int                         `yaml:"stale_age"`
+	NegativeTTL          *int                         `yaml:"negative_ttl"`
+	CacheWarmup          *bool                        `yaml:"cache_warmup"`
+	CacheMaxEntries      *int                         `yaml:"cache_max_entries"`
+	TTLMin               *int                         `yaml:"ttl_min"`
+	TTLMax               *int                         `yaml:"ttl_max"`
+	UpstreamPoolSize     *int                         `yaml:"upstream_pool_size"`
+	UpstreamPoolIdle     *int                         `yaml:"upstream_pool_idle"`
+	LogLevel             *string                      `yaml:"log_level"`
+	LogMode              *string                      `yaml:"log_mode"`
+	LogDir               *string                      `yaml:"log_dir"`
+	LogRetention         *int                         `yaml:"log_retention"`
+	TimeZone             *string                      `yaml:"timezone"`
 	MaxTCPConnsPerClient *int                         `yaml:"max_tcp_conns_per_client"`
 	MetricsEnable        *bool                        `yaml:"metrics_enable"`
 	MetricsPort          *int                         `yaml:"metrics_port"`
@@ -267,6 +284,40 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 		if fc.Hooks.RateLimiting.Action != nil {
 			cfg.Hooks.RateLimiting.Action = *fc.Hooks.RateLimiting.Action
 		}
+		if fc.Hooks.Blocking != nil {
+			if fc.Hooks.Blocking.Enabled != nil {
+				cfg.Hooks.Blocking.Enabled = *fc.Hooks.Blocking.Enabled
+			}
+			if fc.Hooks.Blocking.Priority != nil {
+				cfg.Hooks.Blocking.Priority = *fc.Hooks.Blocking.Priority
+			}
+			if fc.Hooks.Blocking.BlockAction != nil {
+				cfg.Hooks.Blocking.BlockAction = *fc.Hooks.Blocking.BlockAction
+			}
+			if fc.Hooks.Blocking.SinkholeAddr != nil {
+				cfg.Hooks.Blocking.SinkholeAddr = *fc.Hooks.Blocking.SinkholeAddr
+			}
+			if len(fc.Hooks.Blocking.Blocklists) > 0 {
+				cfg.Hooks.Blocking.Blocklists = fc.Hooks.Blocking.Blocklists
+			}
+			if len(fc.Hooks.Blocking.Allowlists) > 0 {
+				cfg.Hooks.Blocking.Allowlists = fc.Hooks.Blocking.Allowlists
+			}
+			if fc.Hooks.Blocking.DomainRPS != nil {
+				cfg.Hooks.Blocking.DomainRPS = *fc.Hooks.Blocking.DomainRPS
+			}
+			if len(fc.Hooks.Blocking.RPZ) > 0 {
+				cfg.Hooks.Blocking.RPZ = make([]RPZConfig, len(fc.Hooks.Blocking.RPZ))
+				for i, r := range fc.Hooks.Blocking.RPZ {
+					if r.Path != nil {
+						cfg.Hooks.Blocking.RPZ[i].Path = *r.Path
+					}
+					if r.Action != nil {
+						cfg.Hooks.Blocking.RPZ[i].Action = *r.Action
+					}
+				}
+			}
+		}
 	}
 }
 
@@ -302,6 +353,14 @@ func configToFile(cfg *Config) *FileConfig {
 	hookRate := cfg.Hooks.RateLimiting.Rate
 	hookAction := cfg.Hooks.RateLimiting.Action
 
+	blockingEnabled := cfg.Hooks.Blocking.Enabled
+	blockingPriority := cfg.Hooks.Blocking.Priority
+	blockingAction := cfg.Hooks.Blocking.BlockAction
+	blockingSinkhole := cfg.Hooks.Blocking.SinkholeAddr
+	blockingLists := cfg.Hooks.Blocking.Blocklists
+	blockingAllowlists := cfg.Hooks.Blocking.Allowlists
+	blockingDomainRPS := cfg.Hooks.Blocking.DomainRPS
+
 	var fileUpstreams []FileUpstreamConfig
 	for _, u := range cfg.Upstreams {
 		name := u.Name
@@ -316,17 +375,27 @@ func configToFile(cfg *Config) *FileConfig {
 		weight := u.Weight
 		adaptiveFactor := u.AdaptiveTimeoutFactor
 		fileUpstreams = append(fileUpstreams, FileUpstreamConfig{
-			Name:                 &name,
-			Address:              &addr,
-			Priority:             &priority,
-			Timeout:              &timeout,
-			TCPOnly:              &tcpOnly,
-			HealthCheck:          &healthCheck,
-			HealthInterval:       &healthInterval,
-			HealthTimeout:        &healthTimeout,
-			MaxFails:             &maxFails,
-			Weight:               &weight,
+			Name:                  &name,
+			Address:               &addr,
+			Priority:              &priority,
+			Timeout:               &timeout,
+			TCPOnly:               &tcpOnly,
+			HealthCheck:           &healthCheck,
+			HealthInterval:        &healthInterval,
+			HealthTimeout:         &healthTimeout,
+			MaxFails:              &maxFails,
+			Weight:                &weight,
 			AdaptiveTimeoutFactor: &adaptiveFactor,
+		})
+	}
+
+	var fileRPZ []FileRPZConfig
+	for _, r := range cfg.Hooks.Blocking.RPZ {
+		path := r.Path
+		action := r.Action
+		fileRPZ = append(fileRPZ, FileRPZConfig{
+			Path:   &path,
+			Action: &action,
 		})
 	}
 
@@ -375,6 +444,16 @@ func configToFile(cfg *Config) *FileConfig {
 				Priority: &hookPriority,
 				Rate:     &hookRate,
 				Action:   &hookAction,
+			},
+			Blocking: &FileBlockingHookConfig{
+				Enabled:      &blockingEnabled,
+				Priority:     &blockingPriority,
+				BlockAction:  &blockingAction,
+				SinkholeAddr: &blockingSinkhole,
+				Blocklists:   blockingLists,
+				Allowlists:   blockingAllowlists,
+				DomainRPS:    &blockingDomainRPS,
+				RPZ:          fileRPZ,
 			},
 		},
 	}
@@ -437,6 +516,11 @@ func WriteDefaultConfig(path string) error {
 	hookPriority := 100
 	hookRate := 0
 	hookAction := "servfail"
+	blockingEnabled := false
+	blockingPriority := 200
+	blockingAction := "nxdomain"
+	blockingSinkhole := "127.0.0.1"
+	blockingDomainRPS := 0
 
 	name := "default"
 	addr := "8.8.8.8:53"
@@ -451,51 +535,58 @@ func WriteDefaultConfig(path string) error {
 	adaptiveFactor := 0.0
 
 	fc := FileConfig{
-		Mode:                &mode,
-		DNSPort:             &dnsPort,
-		UpstreamAddr:        &upstream,
+		Mode:         &mode,
+		DNSPort:      &dnsPort,
+		UpstreamAddr: &upstream,
 		Upstreams: []FileUpstreamConfig{{
-			Name:                 &name,
-			Address:              &addr,
-			Priority:             &defPriority,
-			Timeout:              &timeout,
-			TCPOnly:              &tcpOnly,
-			HealthCheck:          &healthCheck,
-			HealthInterval:       &healthInterval,
-			HealthTimeout:        &healthTimeout,
-			MaxFails:             &maxFails,
-			Weight:               &weight,
+			Name:                  &name,
+			Address:               &addr,
+			Priority:              &defPriority,
+			Timeout:               &timeout,
+			TCPOnly:               &tcpOnly,
+			HealthCheck:           &healthCheck,
+			HealthInterval:        &healthInterval,
+			HealthTimeout:         &healthTimeout,
+			MaxFails:              &maxFails,
+			Weight:                &weight,
 			AdaptiveTimeoutFactor: &adaptiveFactor,
 		}},
-		UpstreamConcurrency: &upstreamConcurrency,
-		CacheAddr:           &cacheAddr,
-		CacheFile:           &cacheFile,
-		Ipv4Disable:         &ipv4Disable,
-		Ipv6Disable:         &ipv6Disable,
-		TcpDisable:          &tcpDisable,
-		RateLimit:           &rateLimit,
-		StaleAge:            &staleAge,
-		NegativeTTL:         &negativeTTL,
-		CacheWarmup:         &cacheWarmup,
-		CacheMaxEntries:     &cacheMaxEntries,
-		TTLMin:              &ttlMin,
-		TTLMax:              &ttlMax,
-		UpstreamPoolSize:    &upstreamPoolSize,
-		UpstreamPoolIdle:    &upstreamPoolIdle,
-		LogLevel:         &logLevel,
-		LogMode:          &logMode,
-		LogDir:           &logDir,
-		LogRetention:     &logRetention,
-		TimeZone:         &timeZone,
+		UpstreamConcurrency:  &upstreamConcurrency,
+		CacheAddr:            &cacheAddr,
+		CacheFile:            &cacheFile,
+		Ipv4Disable:          &ipv4Disable,
+		Ipv6Disable:          &ipv6Disable,
+		TcpDisable:           &tcpDisable,
+		RateLimit:            &rateLimit,
+		StaleAge:             &staleAge,
+		NegativeTTL:          &negativeTTL,
+		CacheWarmup:          &cacheWarmup,
+		CacheMaxEntries:      &cacheMaxEntries,
+		TTLMin:               &ttlMin,
+		TTLMax:               &ttlMax,
+		UpstreamPoolSize:     &upstreamPoolSize,
+		UpstreamPoolIdle:     &upstreamPoolIdle,
+		LogLevel:             &logLevel,
+		LogMode:              &logMode,
+		LogDir:               &logDir,
+		LogRetention:         &logRetention,
+		TimeZone:             &timeZone,
 		MaxTCPConnsPerClient: &maxTCPConnsPerClient,
 		MetricsEnable:        &metricsEnable,
-		MetricsPort:      &metricsPort,
+		MetricsPort:          &metricsPort,
 		Hooks: &FileHookConfig{
 			RateLimiting: FileRateLimitHookConfig{
 				Enabled:  &hookEnabled,
 				Priority: &hookPriority,
 				Rate:     &hookRate,
 				Action:   &hookAction,
+			},
+			Blocking: &FileBlockingHookConfig{
+				Enabled:      &blockingEnabled,
+				Priority:     &blockingPriority,
+				BlockAction:  &blockingAction,
+				SinkholeAddr: &blockingSinkhole,
+				DomainRPS:    &blockingDomainRPS,
 			},
 		},
 	}
