@@ -463,23 +463,78 @@ func TestClientEDNS(t *testing.T) {
 			{Name: "", Type: dns.TypeOPT, Class: 1232, TTL: 0x00008000},
 		},
 	}
-	size, do := clientEDNS(req)
+	size, do, ver := clientEDNS(req)
 	if size != 1232 {
 		t.Errorf("expected size 1232, got %d", size)
 	}
 	if !do {
 		t.Error("expected DO bit set")
 	}
+	if ver != 0 {
+		t.Errorf("expected version 0, got %d", ver)
+	}
+}
+
+func TestClientEDNSVersionNonZero(t *testing.T) {
+	req := &dns.Message{
+		Additionals: []dns.ResourceRecord{
+			{Name: "", Type: dns.TypeOPT, Class: 4096, TTL: 0x00010000},
+		},
+	}
+	_, _, ver := clientEDNS(req)
+	if ver != 1 {
+		t.Errorf("expected version 1, got %d", ver)
+	}
+}
+
+func TestBuildBADVERSPacket(t *testing.T) {
+	req := &dns.Message{
+		Header: dns.Header{ID: 42},
+		Questions: []dns.Question{
+			{Name: "example.com.", Type: dns.TypeA, Class: 1},
+		},
+	}
+	packed := buildBADVERSPacket(req, 1232)
+	var resp dns.Message
+	if err := resp.Parse(packed); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Header.ID != 42 {
+		t.Errorf("expected ID 42, got %d", resp.Header.ID)
+	}
+	if resp.Header.Flags&0x000F != 0 {
+		t.Errorf("expected header RCODE 0 (extended RCODE=16), got %d", resp.Header.Flags&0x000F)
+	}
+	if resp.Header.Flags&0x8000 == 0 {
+		t.Error("expected QR bit set")
+	}
+	if len(resp.Additionals) != 1 || resp.Additionals[0].Type != dns.TypeOPT {
+		t.Error("expected OPT record in additional")
+	}
+	if resp.Additionals[0].Class != 1232 {
+		t.Errorf("expected maxPayload 1232, got %d", resp.Additionals[0].Class)
+	}
+	extRcode := resp.Additionals[0].TTL >> 24
+	if extRcode != dns.RcodeBADVERS>>4 {
+		t.Errorf("expected extended RCODE %d, got %d", dns.RcodeBADVERS>>4, extRcode)
+	}
+	optVersion := (resp.Additionals[0].TTL >> 16) & 0xFF
+	if optVersion != 0 {
+		t.Errorf("expected OPT version 0, got %d", optVersion)
+	}
 }
 
 func TestClientEDNSNoOPT(t *testing.T) {
 	req := &dns.Message{}
-	size, do := clientEDNS(req)
+	size, do, ver := clientEDNS(req)
 	if size != 512 {
 		t.Errorf("expected default size 512, got %d", size)
 	}
 	if do {
 		t.Error("expected DO bit not set")
+	}
+	if ver != 0 {
+		t.Errorf("expected version 0, got %d", ver)
 	}
 }
 
@@ -489,11 +544,14 @@ func TestClientEDNSCustomSize(t *testing.T) {
 			{Name: "", Type: dns.TypeOPT, Class: 4096},
 		},
 	}
-	size, do := clientEDNS(req)
+	size, do, ver := clientEDNS(req)
 	if size != 4096 {
 		t.Errorf("expected size 4096, got %d", size)
 	}
 	if do {
 		t.Error("expected DO bit not set")
+	}
+	if ver != 0 {
+		t.Errorf("expected version 0, got %d", ver)
 	}
 }

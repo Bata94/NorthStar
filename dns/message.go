@@ -91,6 +91,9 @@ func readName(data []byte, off int, visited map[int]bool) (string, int, error) {
 			off += 2
 			return strings.Join(labels, "."), off, nil
 		}
+		if b&0xC0 != 0x00 {
+			return "", off, errors.New("dns: reserved label type")
+		}
 		length := int(b)
 		off++
 		if off+length > len(data) {

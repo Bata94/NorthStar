@@ -290,3 +290,62 @@ func TestMultipleQuestions(t *testing.T) {
 	}
 	roundTrip(t, m)
 }
+
+func TestUnknownTypeRoundTrip(t *testing.T) {
+	rdata := []byte{0x01, 0x02, 0x03, 0x04, 0x05}
+	m := &Message{
+		Header: Header{ID: 42, Flags: 0x8000, QDCount: 1, ANCount: 1},
+		Questions: []Question{
+			{Name: "example.com.", Type: 1, Class: 1},
+		},
+		Answers: []ResourceRecord{{
+			Name: "example.com.", Type: 65432, Class: 1,
+			TTL: 3600, RDLength: uint16(len(rdata)), RData: rdata,
+		}},
+	}
+	packed := m.Pack()
+	var m2 Message
+	if err := m2.Parse(packed); err != nil {
+		t.Fatal(err)
+	}
+	if len(m2.Answers) != 1 {
+		t.Fatalf("expected 1 answer, got %d", len(m2.Answers))
+	}
+	if m2.Answers[0].Type != 65432 {
+		t.Errorf("expected type 65432, got %d", m2.Answers[0].Type)
+	}
+	if len(m2.Answers[0].RData) != len(rdata) {
+		t.Fatalf("expected RData len %d, got %d", len(rdata), len(m2.Answers[0].RData))
+	}
+	for i := range rdata {
+		if m2.Answers[0].RData[i] != rdata[i] {
+			t.Errorf("RData[%d] = %d, want %d", i, m2.Answers[0].RData[i], rdata[i])
+		}
+	}
+}
+
+func TestReservedLabelType(t *testing.T) {
+	msg := &Message{
+		Header:    Header{ID: 1, Flags: 0x0100, QDCount: 1},
+		Questions: []Question{{Name: "example.com.", Type: TypeA, Class: 1}},
+	}
+	packed := msg.Pack()
+	packed[12] = 0x40
+	var m Message
+	err := m.Parse(packed)
+	if err == nil {
+		t.Error("expected error for reserved label type")
+	}
+}
+
+func TestBadPointerBeyondPacket(t *testing.T) {
+	packet := []byte{
+		0, 1, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0,
+		0xC0, 0xFF,
+	}
+	var m Message
+	err := m.Parse(packet)
+	if err == nil {
+		t.Error("expected error for pointer beyond packet")
+	}
+}

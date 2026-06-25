@@ -309,6 +309,15 @@ func buildHooksWithBlocking(cfg *config.Config, c cache.Cache, m *metrics.Metric
 		result = append(result, aclHook)
 	}
 
+	specialCfg := cfg.Hooks.SpecialDomain
+	if specialCfg.Enabled {
+		result = append(result, hooks.NewSpecialDomainHook(
+			specialCfg.Enabled,
+			specialCfg.Priority,
+		))
+		slog.Info("Special domain hook enabled")
+	}
+
 	rateCfg := cfg.Hooks.RateLimiting
 	if rateCfg.Rate == 0 && cfg.RateLimit > 0 {
 		rateCfg.Rate = cfg.RateLimit

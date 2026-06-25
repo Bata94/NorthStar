@@ -109,7 +109,7 @@ func handleDOHQuery(ctx context.Context, w http.ResponseWriter, r *http.Request,
 		clientIP = host
 	}
 
-	maxPayload, do := clientEDNS(&req)
+	maxPayload, do, version := clientEDNS(&req)
 
 	send := func(resp []byte) error {
 		w.Header().Set("Content-Type", "application/dns-message")
@@ -117,5 +117,5 @@ func handleDOHQuery(ctx context.Context, w http.ResponseWriter, r *http.Request,
 		return err
 	}
 
-	processQuery(ctx, &req, "tcp", clientIP, maxPayload, do, send, group, c, runtimeCfg, m)
+	processQuery(ctx, &req, "tcp", clientIP, maxPayload, do, version, send, group, c, runtimeCfg, m)
 }

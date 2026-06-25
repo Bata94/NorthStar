@@ -124,7 +124,7 @@ func handleDOQConn(ctx context.Context, qconn *quic.Conn, group *upstream.Group,
 				clientIP = host
 			}
 
-			maxPayload, do := clientEDNS(&req)
+			maxPayload, do, version := clientEDNS(&req)
 
 			send := func(resp []byte) error {
 				lenPref := make([]byte, 2+len(resp))
@@ -137,7 +137,7 @@ func handleDOQConn(ctx context.Context, qconn *quic.Conn, group *upstream.Group,
 				return err
 			}
 
-			processQuery(ctx, &req, "tcp", clientIP, maxPayload, do, send, group, c, runtimeCfg, m)
+			processQuery(ctx, &req, "tcp", clientIP, maxPayload, do, version, send, group, c, runtimeCfg, m)
 		}()
 	}
 }

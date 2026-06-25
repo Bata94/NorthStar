@@ -73,15 +73,21 @@ type FileQueryLogHookConfig struct {
 	RetentionDays *int    `yaml:"retention_days"`
 }
 
+type FileSpecialDomainHookConfig struct {
+	Enabled  *bool `yaml:"enabled"`
+	Priority *int  `yaml:"priority"`
+}
+
 type FileHookConfig struct {
-	RateLimiting FileRateLimitHookConfig   `yaml:"rate_limiting"`
-	Blocking     *FileBlockingHookConfig   `yaml:"blocking"`
-	QMinimizer   *FileQMinimizerHookConfig `yaml:"qminimizer"`
-	AnyQuery     *FileAnyQueryHookConfig   `yaml:"any_query"`
-	Dns64        *FileDns64HookConfig      `yaml:"dns64"`
-	ECS          *FileEcsHookConfig        `yaml:"ecs"`
-	Dnssec       *FileDnssecHookConfig     `yaml:"dnssec"`
-	QueryLog     *FileQueryLogHookConfig   `yaml:"query_log"`
+	RateLimiting  FileRateLimitHookConfig      `yaml:"rate_limiting"`
+	Blocking      *FileBlockingHookConfig      `yaml:"blocking"`
+	QMinimizer    *FileQMinimizerHookConfig    `yaml:"qminimizer"`
+	AnyQuery      *FileAnyQueryHookConfig      `yaml:"any_query"`
+	Dns64         *FileDns64HookConfig         `yaml:"dns64"`
+	ECS           *FileEcsHookConfig           `yaml:"ecs"`
+	Dnssec        *FileDnssecHookConfig        `yaml:"dnssec"`
+	QueryLog      *FileQueryLogHookConfig      `yaml:"query_log"`
+	SpecialDomain *FileSpecialDomainHookConfig `yaml:"special_domain"`
 }
 
 type FileRateLimitHookConfig struct {
@@ -586,6 +592,14 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 				cfg.Hooks.QueryLog.RetentionDays = *fc.Hooks.QueryLog.RetentionDays
 			}
 		}
+		if fc.Hooks.SpecialDomain != nil {
+			if fc.Hooks.SpecialDomain.Enabled != nil {
+				cfg.Hooks.SpecialDomain.Enabled = *fc.Hooks.SpecialDomain.Enabled
+			}
+			if fc.Hooks.SpecialDomain.Priority != nil {
+				cfg.Hooks.SpecialDomain.Priority = *fc.Hooks.SpecialDomain.Priority
+			}
+		}
 	}
 }
 
@@ -735,6 +749,9 @@ func configToFile(cfg *Config) *FileConfig {
 	queryLogPriority := cfg.Hooks.QueryLog.Priority
 	queryLogFile := cfg.Hooks.QueryLog.File
 	queryLogRetention := cfg.Hooks.QueryLog.RetentionDays
+
+	specialDomainEnabled := cfg.Hooks.SpecialDomain.Enabled
+	specialDomainPriority := cfg.Hooks.SpecialDomain.Priority
 
 	var fileUpstreams []FileUpstreamConfig
 	for _, u := range cfg.Upstreams {
@@ -935,6 +952,10 @@ func configToFile(cfg *Config) *FileConfig {
 				File:          &queryLogFile,
 				RetentionDays: &queryLogRetention,
 			},
+			SpecialDomain: &FileSpecialDomainHookConfig{
+				Enabled:  &specialDomainEnabled,
+				Priority: &specialDomainPriority,
+			},
 		},
 		Zones: fileZones,
 		ACLs:  fileACLs,
@@ -1134,6 +1155,8 @@ func WriteDefaultConfig(path string) error {
 	queryLogPriority := 900
 	queryLogFile := "./query.log"
 	queryLogRetention := 7
+	specialDomainEnabled := true
+	specialDomainPriority := 60
 
 	name := "default"
 	addr := "8.8.8.8:53"
@@ -1261,6 +1284,10 @@ func WriteDefaultConfig(path string) error {
 				Priority:      &queryLogPriority,
 				File:          &queryLogFile,
 				RetentionDays: &queryLogRetention,
+			},
+			SpecialDomain: &FileSpecialDomainHookConfig{
+				Enabled:  &specialDomainEnabled,
+				Priority: &specialDomainPriority,
 			},
 		},
 	}

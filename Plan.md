@@ -382,10 +382,15 @@ feature-complete enough to audit meaningfully
 
 **Goal:** Correctness for relevant RFCs and other Web standards
 
-- [ ] Find all relevant RFCs and other Web standards
-- [ ] Implement and test against them
-- [ ] Valkey-backed integration tests — exercise Valkey cache backend with real Valkey instance (via testcontainers-go); cover TryLock/Unlock, cross-node dedup, rate-limit counter consistency
-- [ ] Fuzz tests for DNS wire format parsing — `*_fuzz_test.go` for `dns.Message.Parse()`, `dns.readName()`, `dns.writeName()`, compression edge cases
+- [X] EDNS Version Negotiation (RFC 3425) — `clientEDNS()` returns version, `buildBADVERSPacket()` with extended RCODE=16 via OPT TTL, `processQuery()` returns BADVERS when EDNS version > 0
+- [X] Truncation Correctness (RFC 1035 §6.2) — `packResponseWithTruncation()` progressively strips sections (keeps OPT first, then answers, then authorities, then additionals) instead of clearing all
+- [X] Unknown RR Types (RFC 3597) — TYPE=65432 round-trips through Parse/Pack with RDATA preserved
+- [X] Special-Use Domain Handling (RFC 6761) — `SpecialDomainHook` (PreResolve, prio 60): localhost A/AAAA, .invalid/.test/.example NXDOMAIN, .local REFUSED; 9 tests
+- [X] Negative Caching Audit (RFC 2308) — verified `negativeTTLFromSOA()` reads last 4 bytes of SOA RDATA; fixed `NewEntry()` not storing `RCode` (was always 0); 3 new tests
+- [X] Class Handling — non-IN classes return REFUSED
+- [X] Name Compression Edge Cases — reserved label types rejected in `readName()`; 2 tests
+- [X] Valkey-backed Integration Tests — 9 tests with `//go:build integration` tag: SetAndGet, GetMiss, Peek, Delete, DeleteDomain, Flush, Incr, TryLockUnlock, Warmup; checks `VALKEY_ADDR` env var, skips gracefully if Valkey unavailable
+- [X] Fuzz Tests — 3 fuzz functions: `FuzzParseMessage`, `FuzzCompressionPointers`, `FuzzWriteReadName`; 380k+ execs with 29 interesting cases, no crashes
 
 **Depends on:** All features deployed and stable
 

@@ -42,14 +42,15 @@ type BlockingHookConfig struct {
 }
 
 type HookConfig struct {
-	RateLimiting RateLimitHookConfig
-	Blocking     BlockingHookConfig
-	QMinimizer   QMinimizerHookConfig
-	AnyQuery     AnyQueryHookConfig
-	Dns64        Dns64HookConfig
-	ECS          EcsHookConfig
-	Dnssec       DnssecHookConfig
-	QueryLog     QueryLogHookConfig
+	RateLimiting  RateLimitHookConfig
+	Blocking      BlockingHookConfig
+	QMinimizer    QMinimizerHookConfig
+	AnyQuery      AnyQueryHookConfig
+	Dns64         Dns64HookConfig
+	ECS           EcsHookConfig
+	Dnssec        DnssecHookConfig
+	QueryLog      QueryLogHookConfig
+	SpecialDomain SpecialDomainHookConfig
 }
 
 type UpstreamConfig struct {
@@ -112,6 +113,11 @@ type QueryLogHookConfig struct {
 	Priority      int
 	File          string // query log file path, default "./query.log"
 	RetentionDays int    // log retention in days, default 7
+}
+
+type SpecialDomainHookConfig struct {
+	Enabled  bool
+	Priority int
 }
 
 type ZoneRecordConfig struct {
@@ -349,6 +355,10 @@ func Load() Config {
 				File:          "./query.log",
 				RetentionDays: 7,
 			},
+			SpecialDomain: SpecialDomainHookConfig{
+				Enabled:  true,
+				Priority: 60,
+			},
 		},
 	}
 
@@ -479,6 +489,10 @@ func Reload() (Config, error) {
 				Priority:      900,
 				File:          "./query.log",
 				RetentionDays: 7,
+			},
+			SpecialDomain: SpecialDomainHookConfig{
+				Enabled:  true,
+				Priority: 60,
 			},
 		},
 	}

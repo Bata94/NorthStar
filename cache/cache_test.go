@@ -307,6 +307,68 @@ func TestMemoryConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 
+func buildSOARDATA(minimum uint32) []byte {
+	mname := []byte{9, 'l', 'o', 'c', 'a', 'l', 'h', 'o', 's', 't', 0}
+	rname := []byte{10, 'h', 'o', 's', 't', 'm', 'a', 's', 't', 'e', 'r', 0}
+	rdata := make([]byte, len(mname)+len(rname)+20)
+	copy(rdata[0:], mname)
+	copy(rdata[len(mname):], rname)
+	off := len(mname) + len(rname)
+	for _, v := range []uint32{2026000001, 3600, 900, 86400, minimum} {
+		rdata[off] = byte(v >> 24)
+		rdata[off+1] = byte(v >> 16)
+		rdata[off+2] = byte(v >> 8)
+		rdata[off+3] = byte(v)
+		off += 4
+	}
+	return rdata
+}
+
+func TestNegativeCacheEntryNXDOMAIN(t *testing.T) {
+	rdata := buildSOARDATA(300)
+	auth := []dns.ResourceRecord{{
+		Name: "example.com.", Type: dns.TypeSOA, Class: 1,
+		TTL: 3600, RDLength: uint16(len(rdata)), RData: rdata,
+	}}
+
+	e := NewEntry("example.com.", 1, dns.RcodeNXDOMAIN, nil, auth, nil, 0, 0, 0)
+	if e.RCode != dns.RcodeNXDOMAIN {
+		t.Errorf("expected RCODE %d, got %d", dns.RcodeNXDOMAIN, e.RCode)
+	}
+	expectedTTL := time.Duration(300) * time.Second
+	remaining := time.Until(e.ExpiresAt)
+	if remaining < expectedTTL-time.Second || remaining > expectedTTL+time.Second {
+		t.Errorf("expected TTL ~%v, got expiresAt=%v (remaining=%v)", expectedTTL, e.ExpiresAt, remaining)
+	}
+}
+
+func TestNegativeCacheEntryNODATA(t *testing.T) {
+	rdata := buildSOARDATA(120)
+	auth := []dns.ResourceRecord{{
+		Name: "example.com.", Type: dns.TypeSOA, Class: 1,
+		TTL: 3600, RDLength: uint16(len(rdata)), RData: rdata,
+	}}
+
+	e := NewEntry("example.com.", 1, dns.RcodeSuccess, nil, auth, nil, 0, 0, 0)
+	if e.RCode != dns.RcodeSuccess {
+		t.Errorf("expected RCODE 0, got %d", e.RCode)
+	}
+	expectedTTL := time.Duration(120) * time.Second
+	remaining := time.Until(e.ExpiresAt)
+	if remaining < expectedTTL-time.Second || remaining > expectedTTL+time.Second {
+		t.Errorf("expected TTL ~%v, got expiresAt=%v (remaining=%v)", expectedTTL, e.ExpiresAt, remaining)
+	}
+}
+
+func TestNegativeCacheEntryConfigurableOverride(t *testing.T) {
+	e := NewEntry("example.com.", 1, dns.RcodeNXDOMAIN, nil, nil, nil, 0, 0, 60)
+	expectedTTL := time.Duration(60) * time.Second
+	remaining := time.Until(e.ExpiresAt)
+	if remaining < expectedTTL-time.Second || remaining > expectedTTL+time.Second {
+		t.Errorf("expected TTL ~%v, got expiresAt=%v (remaining=%v)", expectedTTL, e.ExpiresAt, remaining)
+	}
+}
+
 func TestMemoryLazyEviction(t *testing.T) {
 	m := NewMemory(0, nil)
 	defer m.Close() //nolint:errcheck

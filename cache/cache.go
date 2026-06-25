@@ -128,6 +128,7 @@ func NewEntry(domain string, qtype uint16, rcode uint16, answers, authorities, a
 	e := &Entry{
 		Domain:      domain,
 		QType:       qtype,
+		RCode:       rcode,
 		Answers:     answers,
 		Authorities: authorities,
 		Additionals: additionals,

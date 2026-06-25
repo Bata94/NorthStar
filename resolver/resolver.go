@@ -232,13 +232,14 @@ func SetPipeline(p *hooks.Pipeline) {
 	pipelinePtr.Store(p)
 }
 
-func clientEDNS(req *dns.Message) (size uint16, do bool) {
+func clientEDNS(req *dns.Message) (size uint16, do bool, version uint8) {
 	for _, rr := range req.Additionals {
 		if rr.Type == dns.TypeOPT {
-			return rr.Class, rr.TTL&0x00008000 != 0
+			version = uint8(rr.TTL >> 16)
+			return rr.Class, rr.TTL&0x00008000 != 0, version
 		}
 	}
-	return 512, false
+	return 512, false, 0
 }
 
 func stripOPT(rrs []dns.ResourceRecord) []dns.ResourceRecord {
@@ -309,11 +310,11 @@ func handleTCPConnection(ctx context.Context, conn net.Conn, group *upstream.Gro
 		clientIP = host
 	}
 
-	maxPayload, do := clientEDNS(&req)
+	maxPayload, do, version := clientEDNS(&req)
 	send := func(resp []byte) error {
 		return writeTCPResponse(conn, resp)
 	}
-	processQuery(ctx, &req, "tcp", clientIP, maxPayload, do, send, group, c, runtimeCfg, m)
+	processQuery(ctx, &req, "tcp", clientIP, maxPayload, do, version, send, group, c, runtimeCfg, m)
 }
 
 func writeTCPResponse(conn net.Conn, data []byte) error {
@@ -329,8 +330,22 @@ func writeTCPResponse(conn net.Conn, data []byte) error {
 	return err
 }
 
-func processQuery(ctx context.Context, req *dns.Message, network, clientIP string, maxPayload uint16, do bool, send func([]byte) error, group *upstream.Group, c cache.Cache, runtimeCfg *config.RuntimeConfig, m *metrics.Metrics) {
+func processQuery(ctx context.Context, req *dns.Message, network, clientIP string, maxPayload uint16, do bool, version uint8, send func([]byte) error, group *upstream.Group, c cache.Cache, runtimeCfg *config.RuntimeConfig, m *metrics.Metrics) {
+	if version > 0 {
+		slog.Warn("Unsupported EDNS version", "version", version)
+		resp := buildBADVERSPacket(req, maxPayload)
+		if err := send(resp); err != nil {
+			slog.Error("Error sending BADVERS", "error", err)
+		}
+		return
+	}
+
 	q := req.Questions[0]
+	if q.Class != 1 {
+		slog.Warn("Non-IN class query refused", "class", q.Class, "domain", q.Name)
+		sendRefused(req, send)
+		return
+	}
 	m.QueriesTotal.With(prometheus.Labels{"qtype": strconv.Itoa(int(q.Type))}).Inc()
 
 	pipeline := pipelinePtr.Load()
@@ -407,17 +422,9 @@ func processQuery(ctx context.Context, req *dns.Message, network, clientIP strin
 		return
 	}
 
-	respPacked := resp.Pack()
+	respPacked := packResponseWithTruncation(&resp, maxPayload)
 	if len(respPacked) > int(maxPayload) {
-		slog.Info("Response truncated", "domain", q.Name, "size", len(respPacked), "max", maxPayload)
-		resp.Header.Flags |= 0x0200
-		resp.Answers = nil
-		resp.Authorities = nil
-		resp.Additionals = nil
-		resp.Header.ANCount = 0
-		resp.Header.NSCount = 0
-		resp.Header.ARCount = 0
-		respPacked = resp.Pack()
+		slog.Warn("Response truncated (no records fit)", "domain", q.Name, "size", len(respPacked), "max", maxPayload)
 	}
 
 	if err := send(respPacked); err != nil {
@@ -429,6 +436,25 @@ func processQuery(ctx context.Context, req *dns.Message, network, clientIP strin
 	if err := pipeline.Run(hooks.PostResponse, hookCtx); err != nil {
 		slog.Error("PostResponse hook error", "error", err)
 	}
+}
+
+func buildBADVERSPacket(req *dns.Message, maxPayload uint16) []byte {
+	resp := dns.Message{
+		Header: dns.Header{
+			ID:      req.Header.ID,
+			Flags:   0x8000,
+			QDCount: 1,
+		},
+		Questions: req.Questions,
+	}
+	resp.Header.ARCount = 1
+	resp.Additionals = append(resp.Additionals, dns.ResourceRecord{
+		Name:  "",
+		Type:  dns.TypeOPT,
+		Class: maxPayload,
+		TTL:   uint32(dns.RcodeBADVERS>>4) << 24,
+	})
+	return resp.Pack()
 }
 
 func sendServfail(req *dns.Message, send func([]byte) error) {
@@ -444,6 +470,104 @@ func sendServfail(req *dns.Message, send func([]byte) error) {
 	if err := send(packed); err != nil {
 		slog.Error("Error writing SERVFAIL", "error", err)
 	}
+}
+
+func sendRefused(req *dns.Message, send func([]byte) error) {
+	resp := dns.Message{
+		Header: dns.Header{
+			ID:      req.Header.ID,
+			Flags:   req.Header.Flags & ^uint16(0x002F) | 0x8000 | 0x0005,
+			QDCount: 1,
+		},
+		Questions: req.Questions,
+	}
+	packed := resp.Pack()
+	if err := send(packed); err != nil {
+		slog.Error("Error writing REFUSED", "error", err)
+	}
+}
+
+func packResponseWithTruncation(resp *dns.Message, maxPayload uint16) []byte {
+	packed := resp.Pack()
+	if len(packed) <= int(maxPayload) {
+		return packed
+	}
+	resp.Header.Flags |= 0x0200
+
+	if len(resp.Additionals) > 0 {
+		lastOpt := -1
+		for i := range resp.Additionals {
+			if resp.Additionals[i].Type == dns.TypeOPT {
+				lastOpt = i
+				break
+			}
+		}
+		var tmp []dns.ResourceRecord
+		if lastOpt >= 0 {
+			tmp = append(tmp, resp.Additionals[lastOpt])
+		}
+		saved := resp.Additionals
+		resp.Additionals = tmp
+		resp.Header.ARCount = uint16(len(tmp))
+		packed = resp.Pack()
+		if len(packed) <= int(maxPayload) {
+			return packed
+		}
+		resp.Additionals = saved
+		resp.Header.ARCount = uint16(len(saved))
+	}
+
+	for len(resp.Answers) > 0 {
+		savedLen := len(resp.Answers)
+		probe := resp.Answers[:len(resp.Answers)-1]
+		resp.Answers = probe
+		resp.Header.ANCount = uint16(len(probe))
+		packed = resp.Pack()
+		if len(packed) <= int(maxPayload) {
+			return packed
+		}
+		if len(resp.Answers) == savedLen {
+			break
+		}
+	}
+
+	resp.Answers = nil
+	resp.Header.ANCount = 0
+
+	for len(resp.Authorities) > 0 {
+		savedLen := len(resp.Authorities)
+		probe := resp.Authorities[:len(resp.Authorities)-1]
+		resp.Authorities = probe
+		resp.Header.NSCount = uint16(len(probe))
+		packed = resp.Pack()
+		if len(packed) <= int(maxPayload) {
+			return packed
+		}
+		if len(resp.Authorities) == savedLen {
+			break
+		}
+	}
+
+	resp.Authorities = nil
+	resp.Header.NSCount = 0
+
+	for len(resp.Additionals) > 0 {
+		savedLen := len(resp.Additionals)
+		probe := resp.Additionals[:len(resp.Additionals)-1]
+		resp.Additionals = probe
+		resp.Header.ARCount = uint16(len(probe))
+		packed = resp.Pack()
+		if len(packed) <= int(maxPayload) {
+			return packed
+		}
+		if len(resp.Additionals) == savedLen {
+			break
+		}
+	}
+
+	resp.Additionals = nil
+	resp.Header.ARCount = 0
+	return resp.Pack()
 }
 
 func handleRequest(ctx context.Context, data []byte, remoteAddr *net.UDPAddr, conn *net.UDPConn, group *upstream.Group, c cache.Cache, runtimeCfg *config.RuntimeConfig, m *metrics.Metrics) {
@@ -463,12 +587,12 @@ func handleRequest(ctx context.Context, data []byte, remoteAddr *net.UDPAddr, co
 	}
 
 	clientIP := remoteAddr.IP.String()
-	maxPayload, do := clientEDNS(&req)
+	maxPayload, do, version := clientEDNS(&req)
 	send := func(resp []byte) error {
 		_, err := conn.WriteToUDP(resp, remoteAddr)
 		return err
 	}
-	processQuery(ctx, &req, "udp", clientIP, maxPayload, do, send, group, c, runtimeCfg, m)
+	processQuery(ctx, &req, "udp", clientIP, maxPayload, do, version, send, group, c, runtimeCfg, m)
 }
 
 func fetchFromUpstream(ctx context.Context, domain string, qtype uint16, maxPayload uint16, network string, u *upstream.Upstream, do bool, m *metrics.Metrics, ttlMin, ttlMax, negativeTTL int, ecsData []byte) (*cache.Entry, error) {
