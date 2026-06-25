@@ -56,6 +56,10 @@ type Cache interface {
 	Peek(ctx context.Context, domain string, qtype uint16) (*Entry, bool)
 	Set(ctx context.Context, entry *Entry) error
 	Incr(ctx context.Context, key string, ttl time.Duration) (int64, error)
+	Delete(ctx context.Context, domain string, qtype uint16) error
+	DeleteDomain(ctx context.Context, domain string) error
+	Len() int
+	Evictions() int64
 	Warmup(ctx context.Context, dest Cache) error
 	Close()
 }
@@ -278,6 +282,35 @@ func (m *Memory) Set(_ context.Context, entry *Entry) error {
 	el := m.lruList.PushFront(entry)
 	m.entries[key] = el
 	return nil
+}
+
+func (m *Memory) Delete(_ context.Context, domain string, qtype uint16) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := cacheKey{domain, qtype}
+	if el, ok := m.entries[key]; ok {
+		m.lruList.Remove(el)
+		delete(m.entries, key)
+	}
+	return nil
+}
+
+func (m *Memory) DeleteDomain(_ context.Context, domain string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for key, el := range m.entries {
+		if key.domain == domain {
+			m.lruList.Remove(el)
+			delete(m.entries, key)
+		}
+	}
+	return nil
+}
+
+func (m *Memory) Len() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lruList.Len()
 }
 
 func (m *Memory) Warmup(_ context.Context, _ Cache) error {

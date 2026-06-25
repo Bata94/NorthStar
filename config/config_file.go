@@ -135,6 +135,9 @@ type FileConfig struct {
 	MaxTCPConnsPerClient *int                         `yaml:"max_tcp_conns_per_client"`
 	MetricsEnable        *bool                        `yaml:"metrics_enable"`
 	MetricsPort          *int                         `yaml:"metrics_port"`
+	APIEnable            *bool                        `yaml:"api_enable"`
+	APIPort              *int                         `yaml:"api_port"`
+	APIKey               *string                      `yaml:"api_key"`
 	DoTEnabled           *bool                        `yaml:"dot_enabled"`
 	DoTPort              *int                         `yaml:"dot_port"`
 	DoHEnabled           *bool                        `yaml:"doh_enabled"`
@@ -305,6 +308,15 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 	}
 	if fc.MetricsPort != nil {
 		cfg.MetricsPort = *fc.MetricsPort
+	}
+	if fc.APIEnable != nil {
+		cfg.APIEnable = *fc.APIEnable
+	}
+	if fc.APIPort != nil {
+		cfg.APIPort = *fc.APIPort
+	}
+	if fc.APIKey != nil {
+		cfg.APIKey = *fc.APIKey
 	}
 	if fc.DoTEnabled != nil {
 		cfg.DoTEnabled = *fc.DoTEnabled
@@ -490,6 +502,9 @@ func configToFile(cfg *Config) *FileConfig {
 	maxTCPConnsPerClient := cfg.MaxTCPConnsPerClient
 	metricsEnable := cfg.MetricsEnable
 	metricsPort := cfg.MetricsPort
+	apiEnable := cfg.APIEnable
+	apiPort := cfg.APIPort
+	apiKey := cfg.APIKey
 	dotEnabled := cfg.DoTEnabled
 	dotPort := cfg.DoTPort
 	dohEnabled := cfg.DoHEnabled
@@ -624,6 +639,9 @@ func configToFile(cfg *Config) *FileConfig {
 		MaxTCPConnsPerClient: &maxTCPConnsPerClient,
 		MetricsEnable:        &metricsEnable,
 		MetricsPort:          &metricsPort,
+		APIEnable:            &apiEnable,
+		APIPort:              &apiPort,
+		APIKey:               &apiKey,
 		Dns64Prefix:          &dns64Prefix,
 		EcsPrefixV4:          &ecsPrefixV4,
 		EcsPrefixV6:          &ecsPrefixV6,
@@ -733,6 +751,9 @@ func WriteDefaultConfig(path string) error {
 	maxTCPConnsPerClient := 0
 	metricsEnable := false
 	metricsPort := 9153
+	apiEnable := false
+	apiPort := 9163
+	apiKey := ""
 	dotEnabled := true
 	dotPort := 853
 	dohEnabled := true
@@ -837,6 +858,9 @@ func WriteDefaultConfig(path string) error {
 		MaxTCPConnsPerClient: &maxTCPConnsPerClient,
 		MetricsEnable:        &metricsEnable,
 		MetricsPort:          &metricsPort,
+		APIEnable:            &apiEnable,
+		APIPort:              &apiPort,
+		APIKey:               &apiKey,
 		Hooks: &FileHookConfig{
 			RateLimiting: FileRateLimitHookConfig{
 				Enabled:  &hookEnabled,

@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bata94/northstar/api"
 	"github.com/bata94/northstar/cache"
 	"github.com/bata94/northstar/config"
 	"github.com/bata94/northstar/hooks"
@@ -114,6 +115,7 @@ func main() {
 	}
 	defer upstreamGroup.Close()
 
+	blockingHook, _ := buildHooksWithBlocking(&cfg, backend, m)
 	resolver.SetPipeline(buildPipeline(&cfg, backend, m))
 
 	runtimeCfg := config.NewRuntimeConfig(&cfg)
@@ -136,6 +138,15 @@ func main() {
 		go func() {
 			if err := metrics.Serve(ctx, metricsAddr, m); err != nil {
 				slog.Error("Metrics server error", "error", err)
+			}
+		}()
+	}
+
+	if cfg.APIEnable {
+		apiSrv := api.New(&cfg, cfgPath, upstreamGroup, backend, m, blockingHook)
+		go func() {
+			if err := apiSrv.Serve(ctx); err != nil {
+				slog.Error("API server error", "error", err)
 			}
 		}()
 	}
@@ -214,7 +225,8 @@ func main() {
 
 func buildPipeline(cfg *config.Config, c cache.Cache, m *metrics.Metrics) *hooks.Pipeline {
 	p := hooks.NewPipeline()
-	for _, h := range buildHooks(cfg, c, m) {
+	_, hooks := buildHooksWithBlocking(cfg, c, m)
+	for _, h := range hooks {
 		p.Register(h)
 	}
 	return p
@@ -251,8 +263,9 @@ func reloadConfig(runtimeCfg *config.RuntimeConfig, upstreamGroup *upstream.Grou
 	slog.Warn("Config reloaded")
 }
 
-func buildHooks(cfg *config.Config, c cache.Cache, m *metrics.Metrics) []hooks.Hook {
+func buildHooksWithBlocking(cfg *config.Config, c cache.Cache, m *metrics.Metrics) (*hooks.BlockingHook, []hooks.Hook) {
 	var result []hooks.Hook
+	var blockHook *hooks.BlockingHook
 
 	rateCfg := cfg.Hooks.RateLimiting
 	if rateCfg.Rate == 0 && cfg.RateLimit > 0 {
@@ -295,6 +308,7 @@ func buildHooks(cfg *config.Config, c cache.Cache, m *metrics.Metrics) []hooks.H
 		} else {
 			slog.Info("Blocking hook created", "blocklists", blockCfg.Blocklists, "allowlists", blockCfg.Allowlists, "action", blockCfg.BlockAction)
 			result = append(result, hook)
+			blockHook = hook
 		}
 	}
 
@@ -344,5 +358,5 @@ func buildHooks(cfg *config.Config, c cache.Cache, m *metrics.Metrics) []hooks.H
 		slog.Info("DNSSEC validation enabled", "mode", dnssecCfg.Validation)
 	}
 
-	return result
+	return blockHook, result
 }

@@ -221,6 +221,48 @@ func atoiOrZero(s string) int {
 	return n
 }
 
+func (v *Valkey) Delete(ctx context.Context, domain string, qtype uint16) error {
+	return v.client.Do(ctx, v.client.B().Del().Key(v.key(domain, qtype)).Build()).Error()
+}
+
+func (v *Valkey) DeleteDomain(ctx context.Context, domain string) error {
+	var cursor uint64
+	for {
+		result := v.client.Do(ctx, v.client.B().Scan().Cursor(cursor).Match("northstar:"+domain+":*").Count(100).Build())
+		entry, err := result.AsScanEntry()
+		if err != nil {
+			return err
+		}
+		if len(entry.Elements) > 0 {
+			keys := make([]string, len(entry.Elements))
+			copy(keys, entry.Elements)
+			if err := v.client.Do(ctx, v.client.B().Del().Key(keys...).Build()).Error(); err != nil {
+				return err
+			}
+		}
+		if entry.Cursor == 0 {
+			break
+		}
+		cursor = entry.Cursor
+	}
+	return nil
+}
+
+func (v *Valkey) Len() int {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	result := v.client.Do(ctx, v.client.B().Keys().Pattern("northstar:*").Build())
+	keys, err := result.AsStrSlice()
+	if err != nil {
+		return 0
+	}
+	return len(keys)
+}
+
+func (v *Valkey) Evictions() int64 {
+	return 0
+}
+
 func (v *Valkey) Incr(ctx context.Context, key string, ttl time.Duration) (int64, error) {
 	val, err := v.client.Do(ctx, v.client.B().Incr().Key(key).Build()).AsInt64()
 	if err != nil {

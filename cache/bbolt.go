@@ -86,6 +86,46 @@ func (b *Bbolt) evictExpired() {
 	}
 }
 
+func (b *Bbolt) Delete(_ context.Context, domain string, qtype uint16) error {
+	b.delete(domain, qtype)
+	return nil
+}
+
+func (b *Bbolt) DeleteDomain(_ context.Context, domain string) error {
+	prefix := []byte(domain + ":")
+	return b.db.Update(func(tx *bbolt.Tx) error {
+		bkt := tx.Bucket([]byte("entries"))
+		if bkt == nil {
+			return nil
+		}
+		c := bkt.Cursor()
+		for k, _ := c.Seek(prefix); k != nil && len(k) >= len(prefix) && string(k[:len(prefix)]) == string(prefix); k, _ = c.Next() {
+			if err := bkt.Delete(k); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (b *Bbolt) Len() int {
+	count := 0
+	_ = b.db.View(func(tx *bbolt.Tx) error {
+		bkt := tx.Bucket([]byte("entries"))
+		if bkt == nil {
+			return nil
+		}
+		stats := bkt.Stats()
+		count = stats.KeyN
+		return nil
+	})
+	return count
+}
+
+func (b *Bbolt) Evictions() int64 {
+	return 0
+}
+
 func (b *Bbolt) Get(_ context.Context, domain string, qtype uint16) (*Entry, bool) {
 	entry, ok := b.peek(domain, qtype)
 	if !ok {

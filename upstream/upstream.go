@@ -48,6 +48,10 @@ func (u *Upstream) ReportFailure() {
 	}
 }
 
+func (u *Upstream) FailCount() int64 {
+	return u.failCount.Load()
+}
+
 func (u *Upstream) ReportSuccess() {
 	wasUnhealthy := !u.healthy.Load()
 	u.failCount.Store(0)

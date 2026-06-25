@@ -21,6 +21,9 @@ type BlockingHook struct {
 	sinkholeIP net.IP
 	domainRPS  int
 	metrics    *metrics.Metrics
+	blocklists []string
+	allowlists []string
+	rpzConfigs []struct{ Path, Action string }
 }
 
 func NewBlockingHook(cfg struct {
@@ -65,7 +68,35 @@ func NewBlockingHook(cfg struct {
 		sinkholeIP: sinkIP,
 		domainRPS:  cfg.DomainRPS,
 		metrics:    m,
+		blocklists: cfg.Blocklists,
+		allowlists: cfg.Allowlists,
+		rpzConfigs: cfg.RPZ,
 	}, nil
+}
+
+func (h *BlockingHook) Filter() *filter.Filter                      { return h.filter }
+func (h *BlockingHook) RPZ() *filter.RPZSet                         { return h.rpz }
+func (h *BlockingHook) Blocklists() []string                        { return h.blocklists }
+func (h *BlockingHook) Allowlists() []string                        { return h.allowlists }
+func (h *BlockingHook) RPZConfigs() []struct{ Path, Action string } { return h.rpzConfigs }
+func (h *BlockingHook) BlockAction() string                         { return h.action }
+func (h *BlockingHook) ReloadFilter() error {
+	f, err := filter.NewFilter(h.blocklists, h.allowlists)
+	if err != nil {
+		return err
+	}
+	h.filter = f
+
+	var rpzConfigs []struct{ Path, Action string }
+	rpzConfigs = append(rpzConfigs, h.rpzConfigs...)
+	if len(rpzConfigs) > 0 {
+		rs, err := filter.NewRPZSet(rpzConfigs)
+		if err != nil {
+			return err
+		}
+		h.rpz = rs
+	}
+	return nil
 }
 
 func (h *BlockingHook) Name() string         { return "blocking" }

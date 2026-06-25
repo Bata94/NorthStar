@@ -150,6 +150,9 @@ type Config struct {
 	MaxTCPConnsPerClient int
 	MetricsEnable        bool
 	MetricsPort          int
+	APIEnable            bool
+	APIPort              int
+	APIKey               string
 	ConfigPath           string
 	Dns64Prefix          string // NAT64 prefix, default "64:ff9b::/96"
 	EcsPrefixV4          int    // source prefix length for IPv4 (default 24)
@@ -202,6 +205,9 @@ func Load() Config {
 		MaxTCPConnsPerClient: 0,
 		MetricsEnable:        false,
 		MetricsPort:          9153,
+		APIEnable:            false,
+		APIPort:              9163,
+		APIKey:               "",
 		Dns64Prefix:          "64:ff9b::/96",
 		EcsPrefixV4:          24,
 		EcsPrefixV6:          56,
@@ -315,6 +321,9 @@ func Reload() (Config, error) {
 		MaxTCPConnsPerClient: 0,
 		MetricsEnable:        false,
 		MetricsPort:          9153,
+		APIEnable:            false,
+		APIPort:              9163,
+		APIKey:               "",
 		Dns64Prefix:          "64:ff9b::/96",
 		EcsPrefixV4:          24,
 		EcsPrefixV6:          56,
@@ -515,6 +524,15 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v, ok := os.LookupEnv("NORTHSTAR_ECS_PREFIX_V6"); ok {
 		cfg.EcsPrefixV6 = atoiOrZero(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_API_ENABLE"); ok {
+		cfg.APIEnable = isTrue(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_API_PORT"); ok {
+		cfg.APIPort = atoiOrZero(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_API_KEY"); ok {
+		cfg.APIKey = v
 	}
 	// ConfigPath override (not from file, directly via env)
 	if v, ok := os.LookupEnv("NORTHSTAR_CONFIG"); ok {

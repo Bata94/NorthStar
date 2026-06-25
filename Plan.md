@@ -76,7 +76,6 @@
 - YAML/TOML config file — single source of truth with env var
   override hierarchy (file < env var < API)
 - Hot-reload on SIGHUP — re-read config file without restart
-- WebUI — browser-based management dashboard consuming the REST API
 
 ## Middleware & Hooks System
 
@@ -259,12 +258,18 @@ communication.
 
 ---
 
-## Phase 7: API & WebUI
+## Phase 7: API
 
-**Goal:** Remote management and visibility.
+**Goal:** Remote management via REST API.
 
-- [ ] REST API (CRUD upstreams, blocklists, zones, cache, runtime config)
-- [ ] WebUI consuming the REST API
+- [X] REST API (CRUD upstreams, blocklists, cache, system info)
+  - System endpoints: health, status, config
+  - Upstream CRUD: list, get, create, update, delete with YAML persistence
+  - Blocklist/allowlist: paths, counts, reload, test, stats
+  - Cache: stats, flush, delete by domain/qtype, inspect entry
+  - API key auth via `X-API-Key` header
+  - Config fields: `APIEnable`, `APIPort` (9163), `APIKey` with env overrides
+  - Cache interface extended: `Delete`, `DeleteDomain`, `Len`, `Evictions`
 
 **Depends on:** Phase 3 (upstreams to manage), Phase 4 (blocklists to manage),
 Phase 5 (transport config), Phase 6 (DNSSEC config)
