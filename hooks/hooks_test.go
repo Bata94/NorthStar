@@ -38,7 +38,7 @@ func TestPipelineRegisterAndRunEmpty(t *testing.T) {
 }
 
 func TestRateLimitHook(t *testing.T) {
-	mem := cache.NewMemory(0)
+	mem := cache.NewMemory(0, nil)
 	defer mem.Close()
 
 	m := metrics.New()
@@ -74,7 +74,7 @@ func TestRateLimitHook(t *testing.T) {
 }
 
 func TestRateLimitHookDropAction(t *testing.T) {
-	mem := cache.NewMemory(0)
+	mem := cache.NewMemory(0, nil)
 	defer mem.Close()
 
 	m := metrics.New()

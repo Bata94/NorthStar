@@ -67,31 +67,33 @@ func main() {
 	slog.SetDefault(log.New(logLevel, logMode, cfg.LogDir, cfg.LogRetention))
 	slog.Warn("starting northstar", "version", Version)
 
+	m := metrics.New()
+
 	var backend cache.Cache
 	switch {
 	case cfg.CacheAddr != "" && cfg.CacheFile != "":
 		slog.Warn("Both CacheAddr and CacheFile set, using Valkey")
 		fallthrough
 	case cfg.CacheAddr != "":
-		b, err := cache.NewValkey(cfg.CacheAddr, cfg.StaleAge)
+		b, err := cache.NewValkey(cfg.CacheAddr, cfg.StaleAge, m)
 		if err != nil {
 			slog.Error("Valkey unreachable, using in-memory cache", "error", err)
-			backend = cache.NewMemory(cfg.CacheMaxEntries)
+			backend = cache.NewMemory(cfg.CacheMaxEntries, m)
 		} else {
 			slog.Info("Using Valkey cache", "addr", cfg.CacheAddr)
 			backend = b
 		}
 	case cfg.CacheFile != "":
-		b, err := cache.NewBbolt(cfg.CacheFile, cfg.StaleAge)
+		b, err := cache.NewBbolt(cfg.CacheFile, cfg.StaleAge, m)
 		if err != nil {
 			slog.Error("Bbolt cache open failed, using in-memory cache", "error", err)
-			backend = cache.NewMemory(cfg.CacheMaxEntries)
+			backend = cache.NewMemory(cfg.CacheMaxEntries, m)
 		} else {
 			slog.Info("Using bbolt cache", "file", cfg.CacheFile)
 			backend = b
 		}
 	default:
-		backend = cache.NewMemory(cfg.CacheMaxEntries)
+		backend = cache.NewMemory(cfg.CacheMaxEntries, m)
 	}
 	defer backend.Close()
 
@@ -108,9 +110,7 @@ func main() {
 		}()
 	}
 
-	m := metrics.New()
-
-	upstreamGroup, err := upstream.NewGroup(&cfg)
+	upstreamGroup, err := upstream.NewGroup(&cfg, m)
 	if err != nil {
 		slog.Error("Failed to initialize upstream group", "error", err)
 		os.Exit(1)
@@ -152,7 +152,7 @@ func main() {
 	if cfg.MetricsEnable {
 		metricsAddr := fmt.Sprintf(":%d", cfg.MetricsPort)
 		go func() {
-			if err := metrics.Serve(ctx, metricsAddr, m); err != nil {
+			if err := metrics.Serve(ctx, metricsAddr, m, cfg.DebugEnable); err != nil {
 				slog.Error("Metrics server error", "error", err)
 			}
 		}()
@@ -389,6 +389,17 @@ func buildHooksWithBlocking(cfg *config.Config, c cache.Cache, m *metrics.Metric
 			dnssecCfg.TrustAnchor,
 		))
 		slog.Info("DNSSEC validation enabled", "mode", dnssecCfg.Validation)
+	}
+
+	queryLogCfg := cfg.Hooks.QueryLog
+	if queryLogCfg.Enabled {
+		result = append(result, hooks.NewQueryLogHook(
+			queryLogCfg.Enabled,
+			queryLogCfg.Priority,
+			queryLogCfg.File,
+			queryLogCfg.RetentionDays,
+		))
+		slog.Info("Query log enabled", "file", queryLogCfg.File)
 	}
 
 	return blockHook, result

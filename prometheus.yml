@@ -1,0 +1,13 @@
+# northstar Prometheus scrape configuration
+# Copy to your Prometheus server or use with docker-compose.
+
+scrape_configs:
+  - job_name: "northstar"
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - "localhost:9153"
+        labels:
+          instance: "northstar"

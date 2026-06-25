@@ -48,6 +48,7 @@ type HookConfig struct {
 	Dns64        Dns64HookConfig
 	ECS          EcsHookConfig
 	Dnssec       DnssecHookConfig
+	QueryLog     QueryLogHookConfig
 }
 
 type UpstreamConfig struct {
@@ -103,6 +104,13 @@ type DnssecHookConfig struct {
 	Priority    int
 	Validation  string // "required" or "opportunistic"
 	TrustAnchor string // path to root trust anchor file
+}
+
+type QueryLogHookConfig struct {
+	Enabled       bool
+	Priority      int
+	File          string // query log file path, default "./query.log"
+	RetentionDays int    // log retention in days, default 7
 }
 
 type ZoneRecordConfig struct {
@@ -214,6 +222,7 @@ type Config struct {
 	DoQPort              int
 	CacheWarmup          bool
 	MaxTCPConnsPerClient int
+	DebugEnable          bool
 	MetricsEnable        bool
 	MetricsPort          int
 	APIEnable            bool
@@ -271,6 +280,7 @@ func Load() Config {
 		TimeZone:             "",
 		CacheWarmup:          false,
 		MaxTCPConnsPerClient: 0,
+		DebugEnable:          false,
 		MetricsEnable:        false,
 		MetricsPort:          9153,
 		APIEnable:            false,
@@ -321,6 +331,12 @@ func Load() Config {
 				Priority:    700,
 				Validation:  "opportunistic",
 				TrustAnchor: "",
+			},
+			QueryLog: QueryLogHookConfig{
+				Enabled:       false,
+				Priority:      900,
+				File:          "./query.log",
+				RetentionDays: 7,
 			},
 		},
 	}
@@ -442,6 +458,12 @@ func Reload() (Config, error) {
 				Validation:  "opportunistic",
 				TrustAnchor: "",
 			},
+			QueryLog: QueryLogHookConfig{
+				Enabled:       false,
+				Priority:      900,
+				File:          "./query.log",
+				RetentionDays: 7,
+			},
 		},
 	}
 
@@ -552,6 +574,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v, ok := os.LookupEnv("NORTHSTAR_DNS_MAX_TCP_CONNS_PER_CLIENT"); ok {
 		cfg.MaxTCPConnsPerClient = atoiOrZero(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_DEBUG_ENABLE"); ok {
+		cfg.DebugEnable = isTrue(v)
 	}
 	if v, ok := os.LookupEnv("NORTHSTAR_METRICS_ENABLE"); ok {
 		cfg.MetricsEnable = isTrue(v)

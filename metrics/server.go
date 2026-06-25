@@ -9,11 +9,21 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/http/pprof"
 )
 
-func Serve(ctx context.Context, addr string, m *Metrics) error {
+func Serve(ctx context.Context, addr string, m *Metrics, debug bool) error {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", m.Handler())
+
+	if debug {
+		mux.HandleFunc("/debug/pprof/", pprof.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+		slog.Warn("pprof debug endpoints enabled on metrics HTTP server")
+	}
 
 	server := &http.Server{
 		Addr:    addr,

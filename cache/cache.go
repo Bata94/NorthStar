@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/bata94/northstar/dns"
+	"github.com/bata94/northstar/metrics"
 )
 
 const defaultTTL = 3600
@@ -170,18 +171,20 @@ type Memory struct {
 	countersMu sync.Mutex
 	stopCh     chan struct{}
 	evictions  atomic.Int64
+	metrics    *metrics.Metrics
 }
 
-func NewMemory(maxEntries int) *Memory {
-	m := &Memory{
+func NewMemory(maxEntries int, m *metrics.Metrics) *Memory {
+	mem := &Memory{
 		entries:    make(map[cacheKey]*list.Element),
 		lruList:    list.New(),
 		maxEntries: maxEntries,
 		counters:   make(map[string]*counterEntry),
 		stopCh:     make(chan struct{}),
+		metrics:    m,
 	}
-	go m.evictLoop()
-	return m
+	go mem.evictLoop()
+	return mem
 }
 
 func (m *Memory) Evictions() int64 {
@@ -200,6 +203,9 @@ func (m *Memory) evictLoop() {
 				if entry.Expired() {
 					delete(m.entries, cacheKey{entry.Domain, entry.QType})
 					m.lruList.Remove(e)
+					if m.metrics != nil {
+						m.metrics.CacheEvictionsTotal.WithLabelValues("memory").Inc()
+					}
 				}
 			}
 			m.mu.Unlock()
@@ -236,6 +242,9 @@ func (m *Memory) evictOne() {
 		delete(m.entries, cacheKey{entry.Domain, entry.QType})
 		m.lruList.Remove(e)
 		m.evictions.Add(1)
+		if m.metrics != nil {
+			m.metrics.CacheEvictionsTotal.WithLabelValues("memory").Inc()
+		}
 	}
 }
 

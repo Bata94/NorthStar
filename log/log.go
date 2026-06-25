@@ -196,7 +196,7 @@ func levelFromString(s string) slog.Level {
 	}
 }
 
-type rotateWriter struct {
+type RotateWriter struct {
 	mu      sync.Mutex
 	dir     string
 	prefix  string
@@ -206,11 +206,20 @@ type rotateWriter struct {
 	now     func() time.Time
 }
 
-func newRotateWriter(dir, prefix string, maxAge time.Duration) *rotateWriter {
-	return &rotateWriter{dir: dir, prefix: prefix, maxAge: maxAge, now: time.Now}
+func newRotateWriter(dir, prefix string, maxAge time.Duration) *RotateWriter {
+	return &RotateWriter{dir: dir, prefix: prefix, maxAge: maxAge, now: time.Now}
 }
 
-func (w *rotateWriter) Write(p []byte) (int, error) {
+func NewFileRotateWriter(dir, prefix string, maxAge int) *RotateWriter {
+	return &RotateWriter{
+		dir:    dir,
+		prefix: prefix,
+		maxAge: time.Duration(maxAge) * 24 * time.Hour,
+		now:    time.Now,
+	}
+}
+
+func (w *RotateWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -225,7 +234,7 @@ func (w *rotateWriter) Write(p []byte) (int, error) {
 	return w.current.Write(p)
 }
 
-func (w *rotateWriter) rotate(now time.Time) error {
+func (w *RotateWriter) rotate(now time.Time) error {
 	if w.current != nil {
 		if err := w.current.Close(); err != nil {
 			return err
@@ -249,7 +258,7 @@ func (w *rotateWriter) rotate(now time.Time) error {
 	return nil
 }
 
-func (w *rotateWriter) cleanup(now time.Time) {
+func (w *RotateWriter) cleanup(now time.Time) {
 	entries, err := os.ReadDir(w.dir)
 	if err != nil {
 		return
@@ -275,7 +284,7 @@ func (w *rotateWriter) cleanup(now time.Time) {
 	}
 }
 
-func (w *rotateWriter) Close() error {
+func (w *RotateWriter) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.current != nil {

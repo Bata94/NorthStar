@@ -302,13 +302,14 @@ func processQuery(ctx context.Context, req *dns.Message, network, clientIP strin
 	}
 
 	hookCtx := &hooks.Context{
-		Ctx:      ctx,
-		Request:  req,
-		ClientIP: clientIP,
-		Network:  network,
-		Cache:    c,
-		Metrics:  m,
-		Send:     send,
+		Ctx:       ctx,
+		Request:   req,
+		ClientIP:  clientIP,
+		Network:   network,
+		Cache:     c,
+		Metrics:   m,
+		Send:      send,
+		StartTime: time.Now(),
 	}
 
 	if err := pipeline.Run(hooks.PreResolve, hookCtx); err != nil {
@@ -633,6 +634,7 @@ func refreshCache(call *inflightCall, ikey inflightKey, domain string, qtype uin
 
 func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.Group, c cache.Cache, maxPayload uint16, network string, runtimeCfg *config.RuntimeConfig, do bool, m *metrics.Metrics, ecsData []byte, preferredUpstream string) (*cache.Entry, string, error) {
 	m.CacheLookups.Inc()
+	m.NegativeCacheLookups.Inc()
 	ttlMin := int(runtimeCfg.TTLMin.Load())
 	ttlMax := int(runtimeCfg.TTLMax.Load())
 	negativeTTL := int(runtimeCfg.NegativeTTL.Load())
@@ -642,6 +644,9 @@ func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.G
 		if !entry.Expired() {
 			slog.Debug("Cache hit", "domain", domain, "type", qtype)
 			m.CacheHits.Inc()
+			if entry.RCode == 3 || (entry.RCode == 0 && len(entry.Answers) == 0) {
+				m.NegativeCacheHits.Inc()
+			}
 			entry.RecordHit()
 			return entry, "", nil
 		}

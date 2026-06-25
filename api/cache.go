@@ -20,7 +20,7 @@ func (s *Server) handleCacheStats(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCacheFlush(w http.ResponseWriter, r *http.Request) {
 	entries := s.cache.Len()
 	if entries > 0 {
-		s.cache = cache.NewMemory(0)
+		s.cache = cache.NewMemory(0, nil)
 	}
 	slog.Info("Cache flushed via API", "entries_removed", entries)
 	writeOK(w, map[string]any{"entries_removed": entries})

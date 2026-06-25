@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/bata94/northstar/cache"
 	"github.com/bata94/northstar/dns"
@@ -41,6 +42,7 @@ type Context struct {
 	Upstream          string
 	ECSData           []byte
 	PreferredUpstream string
+	StartTime         time.Time
 }
 
 type Hook interface {

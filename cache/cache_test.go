@@ -160,7 +160,7 @@ func TestCopyRecordsFloorOneSecond(t *testing.T) {
 }
 
 func TestMemoryGetSet(t *testing.T) {
-	m := NewMemory(0)
+	m := NewMemory(0, nil)
 	defer m.Close()
 
 	ctx := context.Background()
@@ -181,7 +181,7 @@ func TestMemoryGetSet(t *testing.T) {
 }
 
 func TestMemoryGetMiss(t *testing.T) {
-	m := NewMemory(0)
+	m := NewMemory(0, nil)
 	defer m.Close()
 	_, ok := m.Get(context.Background(), "nonexistent", 1)
 	if ok {
@@ -190,7 +190,7 @@ func TestMemoryGetMiss(t *testing.T) {
 }
 
 func TestMemoryPeek(t *testing.T) {
-	m := NewMemory(0)
+	m := NewMemory(0, nil)
 	defer m.Close()
 
 	ctx := context.Background()
@@ -208,7 +208,7 @@ func TestMemoryPeek(t *testing.T) {
 }
 
 func TestMemoryPeekExpired(t *testing.T) {
-	m := NewMemory(0)
+	m := NewMemory(0, nil)
 	defer m.Close() //nolint:errcheck
 
 	ctx := context.Background()
@@ -228,7 +228,7 @@ func TestMemoryPeekExpired(t *testing.T) {
 }
 
 func TestMemoryGetDeletesExpired(t *testing.T) {
-	m := NewMemory(0)
+	m := NewMemory(0, nil)
 	defer m.Close() //nolint:errcheck
 
 	ctx := context.Background()
@@ -250,7 +250,7 @@ func TestMemoryGetDeletesExpired(t *testing.T) {
 }
 
 func TestMemoryIncr(t *testing.T) {
-	m := NewMemory(0)
+	m := NewMemory(0, nil)
 	defer m.Close() //nolint:errcheck
 
 	ctx := context.Background()
@@ -272,7 +272,7 @@ func TestMemoryIncr(t *testing.T) {
 }
 
 func TestMemoryIncrExpiry(t *testing.T) {
-	m := NewMemory(0)
+	m := NewMemory(0, nil)
 	defer m.Close() //nolint:errcheck
 
 	ctx := context.Background()
@@ -288,7 +288,7 @@ func TestMemoryIncrExpiry(t *testing.T) {
 }
 
 func TestMemoryConcurrentAccess(t *testing.T) {
-	m := NewMemory(0)
+	m := NewMemory(0, nil)
 	defer m.Close() //nolint:errcheck
 
 	ctx := context.Background()
@@ -308,7 +308,7 @@ func TestMemoryConcurrentAccess(t *testing.T) {
 }
 
 func TestMemoryLazyEviction(t *testing.T) {
-	m := NewMemory(0)
+	m := NewMemory(0, nil)
 	defer m.Close() //nolint:errcheck
 
 	ctx := context.Background()

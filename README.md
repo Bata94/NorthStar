@@ -94,6 +94,67 @@ export NORTHSTAR_CONFIG=/etc/northstar/config.yaml
 | `NORTHSTAR_METRICS_ENABLE` | `false` | Enable Prometheus metrics endpoint |
 | `NORTHSTAR_METRICS_PORT` | `9153` | Metrics HTTP server port |
 
+## Monitoring & Observability
+
+northstar exposes Prometheus metrics and optional pprof debug endpoints for observability.
+
+### Metrics
+
+Set `metrics_enable: true` in the config (default port `9153`) to expose a `/metrics` endpoint.
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `northstar_dns_queries_total` | Counter | `qtype` | Total DNS queries received |
+| `northstar_dns_errors_total` | Counter | `type` | Errors by category (parse_error, servfail, rate_limited) |
+| `northstar_dns_active_handlers` | Gauge | — | Current in-flight request handlers |
+| `northstar_cache_lookups_total` | Counter | — | Total cache lookups |
+| `northstar_cache_hits_total` | Counter | — | Fresh cache hits |
+| `northstar_cache_negative_lookups_total` | Counter | — | Negative cache lookups |
+| `northstar_cache_negative_hits_total` | Counter | — | Negative cache hits (NXDOMAIN/NODATA) |
+| `northstar_cache_evictions_total` | Counter | `backend` | Evictions by backend (memory, valkey, bbolt) |
+| `northstar_upstream_latency_seconds` | Histogram | `name` | Upstream query latency |
+| `northstar_upstream_healthy` | Gauge | `name` | Upstream health status (1=healthy) |
+| `northstar_upstream_queries_total` | Counter | `name` | Queries sent per upstream |
+| `northstar_upstream_fails_total` | Counter | `name` | Upstream failures |
+| `northstar_upstream_conditional_hits_total` | Counter | `name, pattern` | Conditional route matches |
+| `northstar_filter_blocked_total` | Counter | `action, qtype` | Blocked queries |
+| `northstar_dnssec_validation_status_total` | Counter | `status` | DNSSEC validation results |
+| `northstar_dns64_syntheses_total` | Counter | — | AAAA record syntheses |
+| `northstar_ecs_queries_total` | Counter | `family` | ECS-injected queries |
+| `northstar_zone_queries_total` | Counter | `zone, qtype` | Authoritative zone queries |
+
+A pre-built Grafana dashboard is available at [`grafana/dashboard.json`](grafana/dashboard.json). Example Prometheus scrape config at [`prometheus.yml`](prometheus.yml).
+
+### pprof Debug Endpoints
+
+Set `debug_enable: true` in the config to mount Go runtime profiling endpoints on the metrics HTTP server:
+
+- `/debug/pprof/` — profiling index
+- `/debug/pprof/profile` — CPU profile
+- `/debug/pprof/heap` — heap profile
+- `/debug/pprof/goroutine` — goroutine dump
+- `/debug/pprof/trace` — execution trace
+
+Usage:
+```shell
+go tool pprof http://localhost:9153/debug/pprof/profile
+```
+
+### Query Log
+
+Enable the query log via `hooks > query_log` in the config:
+
+```yaml
+hooks:
+  query_log:
+    enabled: true
+    priority: 900
+    file: ./query.log
+    retention_days: 7
+```
+
+Produces daily-rotated CSV files (`query-YYYY-MM-DD.log`) with fields: timestamp, client IP, query name, query type, RCODE, latency (ms), cache decision, upstream.
+
 ## Architecture
 
 NorthStar accepts DNS queries on a configurable port over UDP and TCP. Each query is checked against the cache; on a miss, it is forwarded to the upstream resolver via a pooled connection. Responses are cached with their original TTL plus a stale-age grace window for background revalidation. Concurrent identical queries are deduplicated at the inflight layer — only one goroutine fetches from upstream while others wait on the result.

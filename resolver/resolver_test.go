@@ -131,7 +131,7 @@ func testGroup(t *testing.T, addr string) *upstream.Group {
 		UpstreamPoolSize: 10,
 		UpstreamPoolIdle: 30,
 	}
-	g, err := upstream.NewGroup(cfg)
+	g, err := upstream.NewGroup(cfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func testNXDOMAINResponse(t *testing.T, domain string, qtype uint16) []byte {
 func TestResolveCacheHit(t *testing.T) {
 	m := testMetrics()
 	rc := testRuntimeConfig(0)
-	c := cache.NewMemory(0)
+	c := cache.NewMemory(0, nil)
 	defer c.Close()
 
 	mock := startMockUpstream(t, "udp", func(data []byte) []byte {
@@ -224,7 +224,7 @@ func TestResolveCacheHit(t *testing.T) {
 func TestResolveCacheMissUpstream(t *testing.T) {
 	m := testMetrics()
 	rc := testRuntimeConfig(0)
-	c := cache.NewMemory(0)
+	c := cache.NewMemory(0, nil)
 	defer c.Close()
 
 	mock := startMockUpstream(t, "udp", func(data []byte) []byte {
@@ -261,7 +261,7 @@ func TestResolveCacheMissUpstream(t *testing.T) {
 func TestResolveUpstreamError(t *testing.T) {
 	m := testMetrics()
 	rc := testRuntimeConfig(0)
-	c := cache.NewMemory(0)
+	c := cache.NewMemory(0, nil)
 	defer c.Close()
 
 	g := testGroup(t, "127.0.0.1:1")
@@ -276,7 +276,7 @@ func TestResolveUpstreamError(t *testing.T) {
 func TestResolveNXDOMAIN(t *testing.T) {
 	m := testMetrics()
 	rc := testRuntimeConfig(0)
-	c := cache.NewMemory(0)
+	c := cache.NewMemory(0, nil)
 	defer c.Close()
 
 	mock := startMockUpstream(t, "udp", func(data []byte) []byte {
@@ -302,7 +302,7 @@ func TestResolveNXDOMAIN(t *testing.T) {
 func TestResolveStaleWhileRevalidate(t *testing.T) {
 	m := testMetrics()
 	rc := testRuntimeConfig(10)
-	c := cache.NewMemory(0)
+	c := cache.NewMemory(0, nil)
 	defer c.Close()
 
 	mock := startMockUpstream(t, "udp", func(data []byte) []byte {
@@ -343,7 +343,7 @@ func TestResolveStaleWhileRevalidate(t *testing.T) {
 func TestResolveInflightDedup(t *testing.T) {
 	m := testMetrics()
 	rc := testRuntimeConfig(0)
-	c := cache.NewMemory(0)
+	c := cache.NewMemory(0, nil)
 	defer c.Close()
 
 	var callCount int
@@ -389,7 +389,7 @@ type entryResult struct {
 func TestFetchFromUpstreamTCP(t *testing.T) {
 	m := testMetrics()
 	rc := testRuntimeConfig(0)
-	c := cache.NewMemory(0)
+	c := cache.NewMemory(0, nil)
 	defer c.Close()
 
 	mock := startMockUpstream(t, "tcp", func(data []byte) []byte {
@@ -415,7 +415,7 @@ func TestFetchFromUpstreamTCP(t *testing.T) {
 func TestFetchFromUpstreamDNSSEC(t *testing.T) {
 	m := testMetrics()
 	rc := testRuntimeConfig(0)
-	c := cache.NewMemory(0)
+	c := cache.NewMemory(0, nil)
 	defer c.Close()
 
 	mock := startMockUpstream(t, "udp", func(data []byte) []byte {

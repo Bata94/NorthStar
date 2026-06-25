@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"log/slog"
+	"strconv"
 
 	"github.com/bata94/northstar/dns"
 	"github.com/bata94/northstar/zone"
@@ -41,6 +42,10 @@ func (h *AuthoritativeHook) Handle(ctx *Context) error {
 	z := h.zoneSet.Lookup(domain)
 	if z == nil {
 		return nil
+	}
+
+	if ctx.Metrics != nil {
+		ctx.Metrics.ZoneQueriesTotal.WithLabelValues(z.Name, strconv.Itoa(int(q.Type))).Inc()
 	}
 
 	slog.Debug("Serving from authoritative zone", "domain", domain, "type", q.Type, "zone", z.Name)

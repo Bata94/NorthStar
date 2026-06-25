@@ -25,7 +25,7 @@ func TestBlockingHookBlocksDomain(t *testing.T) {
 	blockPath := writeTestList(t, "bad.com\n*.evil.net\n")
 
 	m := metrics.New()
-	mem := cache.NewMemory(0)
+	mem := cache.NewMemory(0, nil)
 	defer mem.Close()
 
 	hook, err := NewBlockingHook(struct {
@@ -78,7 +78,7 @@ func TestBlockingHookAllowlist(t *testing.T) {
 	allowPath := writeTestList(t, "sub.bad.com\n")
 
 	m := metrics.New()
-	mem := cache.NewMemory(0)
+	mem := cache.NewMemory(0, nil)
 	defer mem.Close()
 
 	hook, err := NewBlockingHook(struct {
@@ -123,7 +123,7 @@ func TestBlockingHookSinkhole(t *testing.T) {
 	blockPath := writeTestList(t, "tracked.com\n")
 
 	m := metrics.New()
-	mem := cache.NewMemory(0)
+	mem := cache.NewMemory(0, nil)
 	defer mem.Close()
 
 	hook, err := NewBlockingHook(struct {
@@ -187,7 +187,7 @@ func TestBlockingHookDrop(t *testing.T) {
 	blockPath := writeTestList(t, "drop.me\n")
 
 	m := metrics.New()
-	mem := cache.NewMemory(0)
+	mem := cache.NewMemory(0, nil)
 	defer mem.Close()
 
 	hook, err := NewBlockingHook(struct {
@@ -238,7 +238,7 @@ func TestBlockingHookNotBlocked(t *testing.T) {
 	blockPath := writeTestList(t, "bad.com\n")
 
 	m := metrics.New()
-	mem := cache.NewMemory(0)
+	mem := cache.NewMemory(0, nil)
 	defer mem.Close()
 
 	hook, err := NewBlockingHook(struct {
@@ -305,7 +305,7 @@ func TestBlockingHookRefused(t *testing.T) {
 	blockPath := writeTestList(t, "refused.com\n")
 
 	m := metrics.New()
-	mem := cache.NewMemory(0)
+	mem := cache.NewMemory(0, nil)
 	defer mem.Close()
 
 	hook, err := NewBlockingHook(struct {

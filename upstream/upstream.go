@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/bata94/northstar/config"
+	"github.com/bata94/northstar/metrics"
 	"github.com/bata94/northstar/pool"
 )
 
@@ -157,12 +158,14 @@ type Group struct {
 	byName      map[string]*Upstream
 	routes      []conditionalRoute
 	Concurrency int
+	metrics     *metrics.Metrics
 }
 
-func NewGroup(cfg *config.Config) (*Group, error) {
+func NewGroup(cfg *config.Config, m *metrics.Metrics) (*Group, error) {
 	g := &Group{
 		byName:      make(map[string]*Upstream),
 		Concurrency: cfg.UpstreamConcurrency,
+		metrics:     m,
 	}
 
 	if len(cfg.Upstreams) == 0 {
@@ -276,6 +279,9 @@ func (g *Group) SelectN(ctx context.Context, domain string, n int) []*Upstream {
 
 	for _, route := range g.routes {
 		if matchDomain(domain, route) {
+			if g.metrics != nil {
+				g.metrics.UpstreamConditionalHits.WithLabelValues(route.upstream, route.pattern).Inc()
+			}
 			if u, ok := g.byName[route.upstream]; ok && u.IsHealthy() {
 				return []*Upstream{u}
 			}

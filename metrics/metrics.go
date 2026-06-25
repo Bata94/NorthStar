@@ -14,6 +14,9 @@ type Metrics struct {
 	QueriesTotal            *prometheus.CounterVec
 	CacheLookups            prometheus.Counter
 	CacheHits               prometheus.Counter
+	CacheEvictionsTotal     *prometheus.CounterVec
+	NegativeCacheLookups    prometheus.Counter
+	NegativeCacheHits       prometheus.Counter
 	UpstreamLatency         *prometheus.HistogramVec
 	ErrorsTotal             *prometheus.CounterVec
 	ActiveHandlers          prometheus.Gauge
@@ -21,12 +24,12 @@ type Metrics struct {
 	UpstreamFails           *prometheus.CounterVec
 	UpstreamProbeDuration   *prometheus.HistogramVec
 	UpstreamQueries         *prometheus.CounterVec
-	UpstreamConcurrentWins  *prometheus.CounterVec
 	UpstreamConditionalHits *prometheus.CounterVec
 	BlockedTotal            *prometheus.CounterVec
 	DnssecValidationStatus  *prometheus.CounterVec
 	Dns64SynthesesTotal     prometheus.Counter
 	EcsQueriesTotal         *prometheus.CounterVec
+	ZoneQueriesTotal        *prometheus.CounterVec
 	Registry                *prometheus.Registry
 }
 
@@ -57,6 +60,30 @@ func New() *Metrics {
 		Help:      "Total cache hits (fresh entries).",
 	})
 	reg.MustRegister(m.CacheHits)
+
+	m.CacheEvictionsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "northstar",
+		Subsystem: "cache",
+		Name:      "evictions_total",
+		Help:      "Total cache evictions by backend type.",
+	}, []string{"backend"})
+	reg.MustRegister(m.CacheEvictionsTotal)
+
+	m.NegativeCacheLookups = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "northstar",
+		Subsystem: "cache",
+		Name:      "negative_lookups_total",
+		Help:      "Total negative cache lookups.",
+	})
+	reg.MustRegister(m.NegativeCacheLookups)
+
+	m.NegativeCacheHits = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "northstar",
+		Subsystem: "cache",
+		Name:      "negative_hits_total",
+		Help:      "Total negative cache hits (NXDOMAIN/NODATA).",
+	})
+	reg.MustRegister(m.NegativeCacheHits)
 
 	m.UpstreamLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: "northstar",
@@ -116,14 +143,6 @@ func New() *Metrics {
 	}, []string{"name"})
 	reg.MustRegister(m.UpstreamQueries)
 
-	m.UpstreamConcurrentWins = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "northstar",
-		Subsystem: "upstream",
-		Name:      "concurrent_wins_total",
-		Help:      "Number of concurrent forwarding races won by each upstream.",
-	}, []string{"name"})
-	reg.MustRegister(m.UpstreamConcurrentWins)
-
 	m.UpstreamConditionalHits = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: "northstar",
 		Subsystem: "upstream",
@@ -163,6 +182,14 @@ func New() *Metrics {
 		Help:      "Total queries with ECS option injected, by address family.",
 	}, []string{"family"})
 	reg.MustRegister(m.EcsQueriesTotal)
+
+	m.ZoneQueriesTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "northstar",
+		Subsystem: "zone",
+		Name:      "queries_total",
+		Help:      "Total queries answered from authoritative zones.",
+	}, []string{"zone", "qtype"})
+	reg.MustRegister(m.ZoneQueriesTotal)
 
 	return m
 }

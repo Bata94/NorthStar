@@ -13,9 +13,11 @@ main.go
   │    └─ auto-generate default file if missing (main.go pre-flight)
   └─ config.NewRuntimeConfig(&cfg) → atomic runtime values for SIGHUP reload
   └─ buildPipeline(&cfg, cache, metrics) → resolver.SetPipeline(p) (atomic swap)
-  └─ cache.NewMemory() or cache.NewValkey(addr) → cache.Cache
+  └─ cache.NewMemory(maxEntries, m) or cache.NewValkey(addr, staleAge, m) or cache.NewBbolt(path, staleAge, m) → cache.Cache (metrics for eviction counters)
   └─ log.New(level, mode) → slog.Logger (consoleHandler + JSON file)
   └─ metrics.New() → *metrics.Metrics (custom prometheus registry)
+  └─ if DebugEnable → /debug/pprof/ mounted on metrics HTTP server
+  └─ upstream.NewGroup(cfg, m) → *Group (metrics for conditional hits)
   └─ resolver.NewPool(upstream, udp) + resolver.NewPool(upstream, tcp) → *Pool
   └─ signal.NotifyContext → ctx (SIGTERM/SIGINT)
   └─ signal.Notify → sighupCh (SIGHUP → reload config + rebuild pipeline)
@@ -103,6 +105,7 @@ Default prod level is `warn`, so `Info` and `Debug` are invisible in prod unless
 - `Hook` interface: `Name()`, `Lifecycle()`, `Priority()`, `Enabled()`, `Handle(*Context) error`
 - `Pipeline` — thread-safe sorted slices per lifecycle; `Register()` inserts by priority, `Run()` iterates enabled hooks
 - `RateLimitHook` (PreResolve) — replaces the hardcoded rate-limit check; uses `cache.Incr` with second-granularity key; configurable action (`servfail`)
+- `QueryLogHook` (PostResponse, prio 900) — CSV per-request log with daily rotation; fields: timestamp, client_ip, qname, qtype, rcode, latency_ms, cache_decision, upstream
 - Phase 1: only `RateLimitHook` is wired; other lifecycle points are placeholders
 
 ### `resolver`
@@ -133,12 +136,23 @@ Default prod level is `warn`, so `Info` and `Debug` are invisible in prod unless
 - Two pool instances created in `main.go` (UDP and TCP)
 
 ### `metrics`
-- `Metrics` struct with 6 collectors + custom `prometheus.Registry`
+- `Metrics` struct with 16 collectors + custom `prometheus.Registry`
   - `QueriesTotal` — CounterVec by `qtype`
   - `CacheLookups` / `CacheHits` — Counter
-  - `UpstreamLatency` — Histogram (buckets: 1ms–5s)
+  - `CacheEvictionsTotal` — CounterVec by `backend` (memory/valkey/bbolt)
+  - `NegativeCacheLookups` / `NegativeCacheHits` — Counter
+  - `UpstreamLatency` — HistogramVec by `name` (buckets: 1ms–5s)
+  - `UpstreamQueries` / `UpstreamFails` — CounterVec by `name`
+  - `UpstreamConditionalHits` — CounterVec by `name`, `pattern`
+  - `UpstreamHealthy` — GaugeVec by `name`
+  - `UpstreamProbeDuration` — HistogramVec by `name`
   - `ErrorsTotal` — CounterVec by `type` (parse_error, rate_limited, servfail)
   - `ActiveHandlers` — Gauge
+  - `BlockedTotal` — CounterVec by `action`, `qtype`
+  - `DnssecValidationStatus` — CounterVec by `status`
+  - `Dns64SynthesesTotal` — Counter
+  - `EcsQueriesTotal` — CounterVec by `family`
+  - `ZoneQueriesTotal` — CounterVec by `zone`, `qtype`
 - `New()` — creates registry and registers all collectors (avoids default registry for test safety)
 - `Handler()` — `promhttp.HandlerFor(m.Registry, ...)`
 - `Serve(ctx, addr, m)` — HTTP server on address, `/metrics` handler, graceful shutdown via ctx

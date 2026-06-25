@@ -124,18 +124,15 @@
 
 ## Observability
 
-- Revisit metrics package — add per-upstream latency,
-  per-zone query counts, cache eviction rate, negative cache
-  stats, blocklist hit counters
-- OpenTelemetry tracing — distributed trace propagation for
-  end-to-end query visibility
-- Tailored Grafana dashboard — pre-built dashboard covering
-  all metrics
-- Rotatable query log — per-request log: client IP, query
-  name/type, response RCODE, latency, cache decision (hit/miss/stale),
+- [X] Metrics package cleanup — remove dead collectors, add missing
+  counters (cache evictions, negative cache stats, per-zone queries)
+- [X] Grafana dashboard — pre-built dashboard covering all metrics
+- [X] Rotatable query log (CSV) — per-request log via PostResponse hook:
+  client IP, query name/type, response RCODE, latency, cache decision,
   upstream used
-- pprof / debug endpoints — standard Go runtime profiling
+- [X] pprof / debug endpoints — standard Go runtime profiling
   (CPU, memory, goroutine, mutex)
+- OpenTelemetry tracing (deferred to Phase 13)
 
 ## Scaling & Multi-Node
 
@@ -315,12 +312,28 @@ Phase 6 (zone serving), Phase 7 (zone management via API)
 
 **Goal:** Deep insight into server behavior.
 
-- [ ] Metrics package revisit (per-upstream, per-zone, cache eviction,
-  negative cache, blocklist stats)
-- [ ] OpenTelemetry tracing
-- [ ] Grafana dashboard
-- [ ] Rotatable query log (via hooks)
-- [ ] pprof / debug endpoints
+- [X] Sub-phase 9.1 — pprof / debug endpoints
+  - Import `net/http/pprof`, mount `/debug/pprof/` on metrics HTTP server
+  - Config: `debug_enable` (bool, default false)
+  - Files: `main.go`, `config/config.go`, `config/config_file.go`
+- [X] Sub-phase 9.2 — Metrics package cleanup & additions
+  - Remove dead collectors: `UpstreamConcurrentWins`
+  - Wire `UpstreamConditionalHits` into conditional route matching in `upstream/upstream.go`
+  - New collectors:
+    - `CacheEvictionsTotal` (Counter, label `backend`) — wired in `cache/cache.go`, `cache/valkey.go`, `cache/bbolt.go`
+    - `NegativeCacheLookups` (Counter) — wired in `resolver/resolver.go` on cache peek
+    - `NegativeCacheHits` (Counter) — wired in `resolver/resolver.go` on negative cache hit
+    - `ZoneQueriesTotal` (CounterVec, labels `zone`, `qtype`) — wired in `hooks/authoritative.go`
+- [X] Sub-phase 9.3 — Rotatable query log hook
+  - New hook: `hooks/querylog.go` — `"query_log"`, PostResponse lifecycle, priority 900
+  - CSV format: `timestamp,client_ip,qname,qtype,rcode,latency_ms,cache_decision,upstream`
+  - Reuses `log.RotateWriter` for daily rotation
+  - Config: `QueryLogEnable`, `QueryLogFile` (`./query.log`), `QueryLogRetention` (7 days)
+  - Add `StartTime` field to `hooks.Context`
+- [X] Sub-phase 9.4 — Grafana dashboard
+  - Create `grafana/dashboard.json` — panels for: query rate, cache hit ratio, upstream latency, upstream health, error rate, active handlers, blocked queries, DNSSEC validation, zone queries, cache evictions
+  - Create `prometheus.yml` scrape config
+  - Document in `README.md`
 
 **Depends on:** Phase 1 (hooks for query log), Phase 3+ (metrics for
 upstreams, zones), Phase 7 (metrics in API)
@@ -360,3 +373,24 @@ feature-complete enough to audit meaningfully
 - [ ] Implement and test against them
 
 **Depends on:** All features deployed and stable
+
+---
+
+## Phase 13: Distributed Tracing
+
+**Goal:** End-to-end distributed trace visibility for multi-node deployments.
+
+- [ ] OpenTelemetry integration
+  - Dependencies: `go.opentelemetry.io/otel`, SDK, OTLP exporter (gRPC/HTTP)
+  - Config: `tracing_enable`, `tracing_endpoint` (`localhost:4317`),
+    `tracing_service_name` (`northstar`), `tracing_sample_rate` (0.1)
+  - Spans at key points:
+    - `dns.query` — wraps `processQuery`; tags: client_ip, qname, qtype, rcode
+    - `dns.cache_lookup` — sub-span; tags: hit/miss, stale
+    - `dns.upstream_query` — sub-span; tags: upstream_name, latency_ms
+    - `dns.hook.<name>` — sub-span per hook execution; tags: lifecycle, hook_name
+  - Context propagation through hook `Context`
+  - OTLP exporter to OpenTelemetry Collector / Grafana Tempo / Jaeger
+
+**Depends on:** Phase 9 (observability foundation — metrics, logging),
+Phase 10 (multi-node deployment to benefit from tracing)

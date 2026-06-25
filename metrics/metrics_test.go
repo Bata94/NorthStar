@@ -63,7 +63,7 @@ func TestMetricsServe(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- Serve(ctx, addr, m)
+		errCh <- Serve(ctx, addr, m, false)
 	}()
 
 	time.Sleep(50 * time.Millisecond)
@@ -130,7 +130,7 @@ func TestMetricsServeShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := Serve(ctx, "127.0.0.1:0", m)
+	err := Serve(ctx, "127.0.0.1:0", m, false)
 	if err != nil {
 		t.Fatal(err)
 	}

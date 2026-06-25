@@ -66,6 +66,13 @@ type FileDnssecHookConfig struct {
 	TrustAnchor *string `yaml:"trust_anchor"`
 }
 
+type FileQueryLogHookConfig struct {
+	Enabled       *bool   `yaml:"enabled"`
+	Priority      *int    `yaml:"priority"`
+	File          *string `yaml:"file"`
+	RetentionDays *int    `yaml:"retention_days"`
+}
+
 type FileHookConfig struct {
 	RateLimiting FileRateLimitHookConfig   `yaml:"rate_limiting"`
 	Blocking     *FileBlockingHookConfig   `yaml:"blocking"`
@@ -74,6 +81,7 @@ type FileHookConfig struct {
 	Dns64        *FileDns64HookConfig      `yaml:"dns64"`
 	ECS          *FileEcsHookConfig        `yaml:"ecs"`
 	Dnssec       *FileDnssecHookConfig     `yaml:"dnssec"`
+	QueryLog     *FileQueryLogHookConfig   `yaml:"query_log"`
 }
 
 type FileRateLimitHookConfig struct {
@@ -199,6 +207,7 @@ type FileConfig struct {
 	LogRetention         *int                         `yaml:"log_retention"`
 	TimeZone             *string                      `yaml:"timezone"`
 	MaxTCPConnsPerClient *int                         `yaml:"max_tcp_conns_per_client"`
+	DebugEnable          *bool                        `yaml:"debug_enable"`
 	MetricsEnable        *bool                        `yaml:"metrics_enable"`
 	MetricsPort          *int                         `yaml:"metrics_port"`
 	APIEnable            *bool                        `yaml:"api_enable"`
@@ -372,6 +381,9 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 	if fc.MaxTCPConnsPerClient != nil {
 		cfg.MaxTCPConnsPerClient = *fc.MaxTCPConnsPerClient
 	}
+	if fc.DebugEnable != nil {
+		cfg.DebugEnable = *fc.DebugEnable
+	}
 	if fc.MetricsEnable != nil {
 		cfg.MetricsEnable = *fc.MetricsEnable
 	}
@@ -540,6 +552,20 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 				cfg.Hooks.Dnssec.TrustAnchor = *fc.Hooks.Dnssec.TrustAnchor
 			}
 		}
+		if fc.Hooks.QueryLog != nil {
+			if fc.Hooks.QueryLog.Enabled != nil {
+				cfg.Hooks.QueryLog.Enabled = *fc.Hooks.QueryLog.Enabled
+			}
+			if fc.Hooks.QueryLog.Priority != nil {
+				cfg.Hooks.QueryLog.Priority = *fc.Hooks.QueryLog.Priority
+			}
+			if fc.Hooks.QueryLog.File != nil {
+				cfg.Hooks.QueryLog.File = *fc.Hooks.QueryLog.File
+			}
+			if fc.Hooks.QueryLog.RetentionDays != nil {
+				cfg.Hooks.QueryLog.RetentionDays = *fc.Hooks.QueryLog.RetentionDays
+			}
+		}
 	}
 }
 
@@ -632,6 +658,7 @@ func configToFile(cfg *Config) *FileConfig {
 	logRetention := cfg.LogRetention
 	timeZone := cfg.TimeZone
 	maxTCPConnsPerClient := cfg.MaxTCPConnsPerClient
+	debugEnable := cfg.DebugEnable
 	metricsEnable := cfg.MetricsEnable
 	metricsPort := cfg.MetricsPort
 	apiEnable := cfg.APIEnable
@@ -680,6 +707,11 @@ func configToFile(cfg *Config) *FileConfig {
 	dnssecPriority := cfg.Hooks.Dnssec.Priority
 	dnssecValidation := cfg.Hooks.Dnssec.Validation
 	dnssecTrustAnchor := cfg.Hooks.Dnssec.TrustAnchor
+
+	queryLogEnabled := cfg.Hooks.QueryLog.Enabled
+	queryLogPriority := cfg.Hooks.QueryLog.Priority
+	queryLogFile := cfg.Hooks.QueryLog.File
+	queryLogRetention := cfg.Hooks.QueryLog.RetentionDays
 
 	var fileUpstreams []FileUpstreamConfig
 	for _, u := range cfg.Upstreams {
@@ -816,6 +848,7 @@ func configToFile(cfg *Config) *FileConfig {
 		LogRetention:         &logRetention,
 		TimeZone:             &timeZone,
 		MaxTCPConnsPerClient: &maxTCPConnsPerClient,
+		DebugEnable:          &debugEnable,
 		MetricsEnable:        &metricsEnable,
 		MetricsPort:          &metricsPort,
 		APIEnable:            &apiEnable,
@@ -867,6 +900,12 @@ func configToFile(cfg *Config) *FileConfig {
 				Priority:    &dnssecPriority,
 				Validation:  &dnssecValidation,
 				TrustAnchor: &dnssecTrustAnchor,
+			},
+			QueryLog: &FileQueryLogHookConfig{
+				Enabled:       &queryLogEnabled,
+				Priority:      &queryLogPriority,
+				File:          &queryLogFile,
+				RetentionDays: &queryLogRetention,
 			},
 		},
 		Zones: fileZones,
@@ -1019,6 +1058,7 @@ func WriteDefaultConfig(path string) error {
 	logRetention := 7
 	timeZone := ""
 	maxTCPConnsPerClient := 0
+	debugEnable := false
 	metricsEnable := false
 	metricsPort := 9153
 	apiEnable := false
@@ -1059,6 +1099,10 @@ func WriteDefaultConfig(path string) error {
 	dnssecPriority := 700
 	dnssecValidation := "opportunistic"
 	dnssecTrustAnchor := ""
+	queryLogEnabled := false
+	queryLogPriority := 900
+	queryLogFile := "./query.log"
+	queryLogRetention := 7
 
 	name := "default"
 	addr := "8.8.8.8:53"
@@ -1126,6 +1170,7 @@ func WriteDefaultConfig(path string) error {
 		LogRetention:         &logRetention,
 		TimeZone:             &timeZone,
 		MaxTCPConnsPerClient: &maxTCPConnsPerClient,
+		DebugEnable:          &debugEnable,
 		MetricsEnable:        &metricsEnable,
 		MetricsPort:          &metricsPort,
 		APIEnable:            &apiEnable,
@@ -1171,6 +1216,12 @@ func WriteDefaultConfig(path string) error {
 				Priority:    &dnssecPriority,
 				Validation:  &dnssecValidation,
 				TrustAnchor: &dnssecTrustAnchor,
+			},
+			QueryLog: &FileQueryLogHookConfig{
+				Enabled:       &queryLogEnabled,
+				Priority:      &queryLogPriority,
+				File:          &queryLogFile,
+				RetentionDays: &queryLogRetention,
 			},
 		},
 	}

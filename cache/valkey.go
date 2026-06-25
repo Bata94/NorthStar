@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/bata94/northstar/dns"
+	"github.com/bata94/northstar/metrics"
 	"github.com/valkey-io/valkey-go"
 )
 
@@ -23,9 +24,10 @@ const (
 type Valkey struct {
 	client   valkey.Client
 	staleAge time.Duration
+	metrics  *metrics.Metrics
 }
 
-func NewValkey(addr string, staleAge int) (*Valkey, error) {
+func NewValkey(addr string, staleAge int, m *metrics.Metrics) (*Valkey, error) {
 	client, err := valkey.NewClient(valkey.ClientOption{
 		InitAddress: []string{addr},
 	})
@@ -41,7 +43,7 @@ func NewValkey(addr string, staleAge int) (*Valkey, error) {
 		return nil, fmt.Errorf("valkey ping: %w", err)
 	}
 
-	return &Valkey{client: client, staleAge: time.Duration(staleAge) * time.Second}, nil
+	return &Valkey{client: client, staleAge: time.Duration(staleAge) * time.Second, metrics: m}, nil
 }
 
 func (v *Valkey) Get(ctx context.Context, domain string, qtype uint16) (*Entry, bool) {
@@ -122,6 +124,9 @@ func (v *Valkey) Set(ctx context.Context, entry *Entry) error {
 	remaining := time.Until(entry.ExpiresAt)
 	ttl := remaining + v.staleAge
 	if ttl <= 0 {
+		if v.metrics != nil {
+			v.metrics.CacheEvictionsTotal.WithLabelValues("valkey").Inc()
+		}
 		return nil
 	}
 

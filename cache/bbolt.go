@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bata94/northstar/dns"
+	"github.com/bata94/northstar/metrics"
 	"go.etcd.io/bbolt"
 )
 
@@ -18,9 +19,10 @@ type Bbolt struct {
 	staleAge time.Duration
 	stopCh   chan struct{}
 	wg       sync.WaitGroup
+	metrics  *metrics.Metrics
 }
 
-func NewBbolt(path string, staleAge int) (*Bbolt, error) {
+func NewBbolt(path string, staleAge int, m *metrics.Metrics) (*Bbolt, error) {
 	db, err := bbolt.Open(path, 0644, &bbolt.Options{Timeout: 3 * time.Second})
 	if err != nil {
 		return nil, fmt.Errorf("bbolt open: %w", err)
@@ -38,6 +40,7 @@ func NewBbolt(path string, staleAge int) (*Bbolt, error) {
 		db:       db,
 		staleAge: time.Duration(staleAge) * time.Second,
 		stopCh:   make(chan struct{}),
+		metrics:  m,
 	}
 	b.wg.Add(1)
 	go b.evictLoop()
@@ -77,6 +80,9 @@ func (b *Bbolt) evictExpired() {
 			if now.After(time.Unix(0, nano)) {
 				if err := bkt.Delete(k); err != nil {
 					slog.Error("bbolt evict delete", "error", err)
+				}
+				if b.metrics != nil {
+					b.metrics.CacheEvictionsTotal.WithLabelValues("bbolt").Inc()
 				}
 			}
 		}
