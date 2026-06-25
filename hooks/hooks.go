@@ -37,6 +37,7 @@ type Context struct {
 	Metrics  *metrics.Metrics
 	Send     func([]byte) error
 	Entry    *cache.Entry
+	Upstream string // name of upstream used for this query
 }
 
 type Hook interface {

@@ -21,33 +21,55 @@ type FileRateLimitHookConfig struct {
 	Action   *string `yaml:"action"`
 }
 
+type FileUpstreamConfig struct {
+	Name                *string  `yaml:"name"`
+	Address             *string  `yaml:"address"`
+	Priority            *int     `yaml:"priority"`
+	Timeout             *int     `yaml:"timeout"`
+	TCPOnly             *bool    `yaml:"tcp_only"`
+	HealthCheck         *bool    `yaml:"health_check"`
+	HealthInterval      *int     `yaml:"health_interval"`
+	HealthTimeout       *int     `yaml:"health_timeout"`
+	MaxFails            *int     `yaml:"max_fails"`
+	Weight              *int     `yaml:"weight"`
+	AdaptiveTimeoutFactor *float64 `yaml:"adaptive_timeout_factor"`
+}
+
+type FileConditionalRouteConfig struct {
+	Domain   *string `yaml:"domain"`
+	Upstream *string `yaml:"upstream"`
+}
+
 type FileConfig struct {
-	Mode             *string                `yaml:"mode"`
-	DNSPort          *int            `yaml:"dns_port"`
-	UpstreamAddr     *string         `yaml:"upstream"`
-	CacheAddr        *string         `yaml:"cache_addr"`
-	CacheFile        *string         `yaml:"cache_file"`
-	Ipv4Disable      *bool           `yaml:"ipv4_disable"`
-	Ipv6Disable      *bool           `yaml:"ipv6_disable"`
-	TcpDisable       *bool           `yaml:"tcp_disable"`
-	RateLimit        *int            `yaml:"rate_limit"`
-	StaleAge         *int            `yaml:"stale_age"`
-	NegativeTTL      *int            `yaml:"negative_ttl"`
-	CacheWarmup      *bool           `yaml:"cache_warmup"`
-	CacheMaxEntries  *int            `yaml:"cache_max_entries"`
-	TTLMin           *int            `yaml:"ttl_min"`
-	TTLMax           *int            `yaml:"ttl_max"`
-	UpstreamPoolSize *int            `yaml:"upstream_pool_size"`
-	UpstreamPoolIdle *int            `yaml:"upstream_pool_idle"`
-	LogLevel         *string         `yaml:"log_level"`
-	LogMode          *string         `yaml:"log_mode"`
-	LogDir           *string         `yaml:"log_dir"`
-	LogRetention     *int            `yaml:"log_retention"`
-	TimeZone             *string         `yaml:"timezone"`
-	MaxTCPConnsPerClient *int            `yaml:"max_tcp_conns_per_client"`
-	MetricsEnable        *bool           `yaml:"metrics_enable"`
-	MetricsPort      *int            `yaml:"metrics_port"`
-	Hooks            *FileHookConfig `yaml:"hooks"`
+	Mode                *string                      `yaml:"mode"`
+	DNSPort             *int                         `yaml:"dns_port"`
+	UpstreamAddr        *string                      `yaml:"upstream"`
+	Upstreams           []FileUpstreamConfig          `yaml:"upstreams"`
+	ConditionalRoutes   []FileConditionalRouteConfig  `yaml:"conditional_routes"`
+	UpstreamConcurrency *int                         `yaml:"upstream_concurrency"`
+	CacheAddr           *string                      `yaml:"cache_addr"`
+	CacheFile           *string                      `yaml:"cache_file"`
+	Ipv4Disable         *bool                        `yaml:"ipv4_disable"`
+	Ipv6Disable         *bool                        `yaml:"ipv6_disable"`
+	TcpDisable          *bool                        `yaml:"tcp_disable"`
+	RateLimit           *int                         `yaml:"rate_limit"`
+	StaleAge            *int                         `yaml:"stale_age"`
+	NegativeTTL         *int                         `yaml:"negative_ttl"`
+	CacheWarmup         *bool                        `yaml:"cache_warmup"`
+	CacheMaxEntries     *int                         `yaml:"cache_max_entries"`
+	TTLMin              *int                         `yaml:"ttl_min"`
+	TTLMax              *int                         `yaml:"ttl_max"`
+	UpstreamPoolSize    *int                         `yaml:"upstream_pool_size"`
+	UpstreamPoolIdle    *int                         `yaml:"upstream_pool_idle"`
+	LogLevel            *string                      `yaml:"log_level"`
+	LogMode             *string                      `yaml:"log_mode"`
+	LogDir              *string                      `yaml:"log_dir"`
+	LogRetention        *int                         `yaml:"log_retention"`
+	TimeZone            *string                      `yaml:"timezone"`
+	MaxTCPConnsPerClient *int                         `yaml:"max_tcp_conns_per_client"`
+	MetricsEnable        *bool                        `yaml:"metrics_enable"`
+	MetricsPort          *int                         `yaml:"metrics_port"`
+	Hooks                *FileHookConfig              `yaml:"hooks"`
 }
 
 func loadFile(path string) (*FileConfig, error) {
@@ -62,6 +84,80 @@ func loadFile(path string) (*FileConfig, error) {
 	return &fc, nil
 }
 
+func applyFileUpstream(dst *UpstreamConfig, src *FileUpstreamConfig) {
+	if src.Name != nil {
+		dst.Name = *src.Name
+	}
+	if src.Address != nil {
+		dst.Address = *src.Address
+	}
+	if src.Priority != nil {
+		dst.Priority = *src.Priority
+	}
+	if src.Timeout != nil {
+		dst.Timeout = *src.Timeout
+	}
+	if src.TCPOnly != nil {
+		dst.TCPOnly = *src.TCPOnly
+	}
+	if src.HealthCheck != nil {
+		dst.HealthCheck = *src.HealthCheck
+	}
+	if src.HealthInterval != nil {
+		dst.HealthInterval = *src.HealthInterval
+	}
+	if src.HealthTimeout != nil {
+		dst.HealthTimeout = *src.HealthTimeout
+	}
+	if src.MaxFails != nil {
+		dst.MaxFails = *src.MaxFails
+	}
+	if src.Weight != nil {
+		dst.Weight = *src.Weight
+	}
+	if src.AdaptiveTimeoutFactor != nil {
+		dst.AdaptiveTimeoutFactor = *src.AdaptiveTimeoutFactor
+	}
+}
+
+func fileUpstreamToConfig(src *FileUpstreamConfig) UpstreamConfig {
+	var dst UpstreamConfig
+	if src.Name != nil {
+		dst.Name = *src.Name
+	}
+	if src.Address != nil {
+		dst.Address = *src.Address
+	}
+	if src.Priority != nil {
+		dst.Priority = *src.Priority
+	}
+	if src.Timeout != nil {
+		dst.Timeout = *src.Timeout
+	}
+	if src.TCPOnly != nil {
+		dst.TCPOnly = *src.TCPOnly
+	}
+	if src.HealthCheck != nil {
+		dst.HealthCheck = *src.HealthCheck
+	}
+	if src.HealthInterval != nil {
+		dst.HealthInterval = *src.HealthInterval
+	}
+	if src.HealthTimeout != nil {
+		dst.HealthTimeout = *src.HealthTimeout
+	}
+	if src.MaxFails != nil {
+		dst.MaxFails = *src.MaxFails
+	}
+	if src.Weight != nil {
+		dst.Weight = *src.Weight
+	}
+	if src.AdaptiveTimeoutFactor != nil {
+		dst.AdaptiveTimeoutFactor = *src.AdaptiveTimeoutFactor
+	}
+	return dst
+}
+
 func applyFileConfig(cfg *Config, fc *FileConfig) {
 	if fc.Mode != nil {
 		cfg.Mode = *fc.Mode
@@ -71,6 +167,23 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 	}
 	if fc.UpstreamAddr != nil {
 		cfg.UpstreamAddr = *fc.UpstreamAddr
+	}
+	if len(fc.Upstreams) > 0 {
+		cfg.Upstreams = make([]UpstreamConfig, len(fc.Upstreams))
+		for i := range fc.Upstreams {
+			cfg.Upstreams[i] = fileUpstreamToConfig(&fc.Upstreams[i])
+		}
+	}
+	if len(fc.ConditionalRoutes) > 0 {
+		cfg.ConditionalRoutes = make([]ConditionalRouteConfig, len(fc.ConditionalRoutes))
+		for i := range fc.ConditionalRoutes {
+			if fc.ConditionalRoutes[i].Domain != nil {
+				cfg.ConditionalRoutes[i].Domain = *fc.ConditionalRoutes[i].Domain
+			}
+			if fc.ConditionalRoutes[i].Upstream != nil {
+				cfg.ConditionalRoutes[i].Upstream = *fc.ConditionalRoutes[i].Upstream
+			}
+		}
 	}
 	if fc.CacheAddr != nil {
 		cfg.CacheAddr = *fc.CacheAddr
@@ -113,6 +226,9 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 	}
 	if fc.UpstreamPoolIdle != nil {
 		cfg.UpstreamPoolIdle = *fc.UpstreamPoolIdle
+	}
+	if fc.UpstreamConcurrency != nil {
+		cfg.UpstreamConcurrency = *fc.UpstreamConcurrency
 	}
 	if fc.LogLevel != nil {
 		cfg.LogLevel = *fc.LogLevel
@@ -172,6 +288,7 @@ func configToFile(cfg *Config) *FileConfig {
 	ttlMax := cfg.TTLMax
 	upstreamPoolSize := cfg.UpstreamPoolSize
 	upstreamPoolIdle := cfg.UpstreamPoolIdle
+	upstreamConcurrency := cfg.UpstreamConcurrency
 	logLevel := cfg.LogLevel
 	logMode := cfg.LogMode
 	logDir := cfg.LogDir
@@ -185,32 +302,73 @@ func configToFile(cfg *Config) *FileConfig {
 	hookRate := cfg.Hooks.RateLimiting.Rate
 	hookAction := cfg.Hooks.RateLimiting.Action
 
+	var fileUpstreams []FileUpstreamConfig
+	for _, u := range cfg.Upstreams {
+		name := u.Name
+		addr := u.Address
+		priority := u.Priority
+		timeout := u.Timeout
+		tcpOnly := u.TCPOnly
+		healthCheck := u.HealthCheck
+		healthInterval := u.HealthInterval
+		healthTimeout := u.HealthTimeout
+		maxFails := u.MaxFails
+		weight := u.Weight
+		adaptiveFactor := u.AdaptiveTimeoutFactor
+		fileUpstreams = append(fileUpstreams, FileUpstreamConfig{
+			Name:                 &name,
+			Address:              &addr,
+			Priority:             &priority,
+			Timeout:              &timeout,
+			TCPOnly:              &tcpOnly,
+			HealthCheck:          &healthCheck,
+			HealthInterval:       &healthInterval,
+			HealthTimeout:        &healthTimeout,
+			MaxFails:             &maxFails,
+			Weight:               &weight,
+			AdaptiveTimeoutFactor: &adaptiveFactor,
+		})
+	}
+
+	var fileRoutes []FileConditionalRouteConfig
+	for _, r := range cfg.ConditionalRoutes {
+		domain := r.Domain
+		upstreamName := r.Upstream
+		fileRoutes = append(fileRoutes, FileConditionalRouteConfig{
+			Domain:   &domain,
+			Upstream: &upstreamName,
+		})
+	}
+
 	return &FileConfig{
-		Mode:             &mode,
-		DNSPort:          &dnsPort,
-		UpstreamAddr:     &upstream,
-		CacheAddr:        &cacheAddr,
-		CacheFile:        &cacheFile,
-		Ipv4Disable:      &ipv4Disable,
-		Ipv6Disable:      &ipv6Disable,
-		TcpDisable:       &tcpDisable,
-		RateLimit:        &rateLimit,
-		StaleAge:         &staleAge,
-		NegativeTTL:      &negativeTTL,
-		CacheWarmup:      &cacheWarmup,
-		CacheMaxEntries:  &cacheMaxEntries,
-		TTLMin:           &ttlMin,
-		TTLMax:           &ttlMax,
-		UpstreamPoolSize: &upstreamPoolSize,
-		UpstreamPoolIdle: &upstreamPoolIdle,
-		LogLevel:         &logLevel,
-		LogMode:          &logMode,
-		LogDir:           &logDir,
-		LogRetention:     &logRetention,
+		Mode:                 &mode,
+		DNSPort:              &dnsPort,
+		UpstreamAddr:         &upstream,
+		Upstreams:            fileUpstreams,
+		ConditionalRoutes:    fileRoutes,
+		UpstreamConcurrency:  &upstreamConcurrency,
+		CacheAddr:            &cacheAddr,
+		CacheFile:            &cacheFile,
+		Ipv4Disable:          &ipv4Disable,
+		Ipv6Disable:          &ipv6Disable,
+		TcpDisable:           &tcpDisable,
+		RateLimit:            &rateLimit,
+		StaleAge:             &staleAge,
+		NegativeTTL:          &negativeTTL,
+		CacheWarmup:          &cacheWarmup,
+		CacheMaxEntries:      &cacheMaxEntries,
+		TTLMin:               &ttlMin,
+		TTLMax:               &ttlMax,
+		UpstreamPoolSize:     &upstreamPoolSize,
+		UpstreamPoolIdle:     &upstreamPoolIdle,
+		LogLevel:             &logLevel,
+		LogMode:              &logMode,
+		LogDir:               &logDir,
+		LogRetention:         &logRetention,
 		TimeZone:             &timeZone,
 		MaxTCPConnsPerClient: &maxTCPConnsPerClient,
 		MetricsEnable:        &metricsEnable,
-		MetricsPort:      &metricsPort,
+		MetricsPort:          &metricsPort,
 		Hooks: &FileHookConfig{
 			RateLimiting: FileRateLimitHookConfig{
 				Enabled:  &hookEnabled,
@@ -266,6 +424,7 @@ func WriteDefaultConfig(path string) error {
 	ttlMax := 0
 	upstreamPoolSize := 10
 	upstreamPoolIdle := 30
+	upstreamConcurrency := 1
 	logLevel := ""
 	logMode := ""
 	logDir := "."
@@ -279,29 +438,55 @@ func WriteDefaultConfig(path string) error {
 	hookRate := 0
 	hookAction := "servfail"
 
+	name := "default"
+	addr := "8.8.8.8:53"
+	defPriority := 0
+	timeout := 5
+	tcpOnly := false
+	healthCheck := true
+	healthInterval := 30
+	healthTimeout := 5
+	maxFails := 3
+	weight := 1
+	adaptiveFactor := 0.0
+
 	fc := FileConfig{
-		Mode:             &mode,
-		DNSPort:          &dnsPort,
-		UpstreamAddr:     &upstream,
-		CacheAddr:        &cacheAddr,
-		CacheFile:        &cacheFile,
-		Ipv4Disable:      &ipv4Disable,
-		Ipv6Disable:      &ipv6Disable,
-		TcpDisable:       &tcpDisable,
-		RateLimit:        &rateLimit,
-		StaleAge:         &staleAge,
-		NegativeTTL:      &negativeTTL,
-		CacheWarmup:      &cacheWarmup,
-		CacheMaxEntries:  &cacheMaxEntries,
-		TTLMin:           &ttlMin,
-		TTLMax:           &ttlMax,
-		UpstreamPoolSize: &upstreamPoolSize,
-		UpstreamPoolIdle: &upstreamPoolIdle,
+		Mode:                &mode,
+		DNSPort:             &dnsPort,
+		UpstreamAddr:        &upstream,
+		Upstreams: []FileUpstreamConfig{{
+			Name:                 &name,
+			Address:              &addr,
+			Priority:             &defPriority,
+			Timeout:              &timeout,
+			TCPOnly:              &tcpOnly,
+			HealthCheck:          &healthCheck,
+			HealthInterval:       &healthInterval,
+			HealthTimeout:        &healthTimeout,
+			MaxFails:             &maxFails,
+			Weight:               &weight,
+			AdaptiveTimeoutFactor: &adaptiveFactor,
+		}},
+		UpstreamConcurrency: &upstreamConcurrency,
+		CacheAddr:           &cacheAddr,
+		CacheFile:           &cacheFile,
+		Ipv4Disable:         &ipv4Disable,
+		Ipv6Disable:         &ipv6Disable,
+		TcpDisable:          &tcpDisable,
+		RateLimit:           &rateLimit,
+		StaleAge:            &staleAge,
+		NegativeTTL:         &negativeTTL,
+		CacheWarmup:         &cacheWarmup,
+		CacheMaxEntries:     &cacheMaxEntries,
+		TTLMin:              &ttlMin,
+		TTLMax:              &ttlMax,
+		UpstreamPoolSize:    &upstreamPoolSize,
+		UpstreamPoolIdle:    &upstreamPoolIdle,
 		LogLevel:         &logLevel,
 		LogMode:          &logMode,
 		LogDir:           &logDir,
 		LogRetention:     &logRetention,
-		TimeZone:             &timeZone,
+		TimeZone:         &timeZone,
 		MaxTCPConnsPerClient: &maxTCPConnsPerClient,
 		MetricsEnable:        &metricsEnable,
 		MetricsPort:      &metricsPort,

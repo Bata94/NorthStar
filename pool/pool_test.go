@@ -1,7 +1,7 @@
 // Copyright (c) 2026 bata94
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 
-package resolver
+package pool
 
 import (
 	"context"
@@ -60,7 +60,7 @@ func TestPoolAcquireRelease(t *testing.T) {
 	addr, cleanup := startTestUpstream(t, "tcp")
 	defer cleanup()
 
-	p := NewPool(addr.String(), "tcp", 5, time.Minute)
+	p := New(addr.String(), "tcp", 5, time.Minute)
 	defer p.Close()
 
 	ctx := context.Background()
@@ -87,7 +87,7 @@ func TestPoolReusesIdleConn(t *testing.T) {
 	addr, cleanup := startTestUpstream(t, "tcp")
 	defer cleanup()
 
-	p := NewPool(addr.String(), "tcp", 5, time.Minute)
+	p := New(addr.String(), "tcp", 5, time.Minute)
 	defer p.Close()
 
 	ctx := context.Background()
@@ -111,7 +111,7 @@ func TestPoolOverflowCloses(t *testing.T) {
 	addr, cleanup := startTestUpstream(t, "tcp")
 	defer cleanup()
 
-	p := NewPool(addr.String(), "tcp", 1, time.Minute)
+	p := New(addr.String(), "tcp", 1, time.Minute)
 	defer p.Close()
 
 	ctx := context.Background()
@@ -140,7 +140,7 @@ func TestPoolErrorReleaseCloses(t *testing.T) {
 	addr, cleanup := startTestUpstream(t, "tcp")
 	defer cleanup()
 
-	p := NewPool(addr.String(), "tcp", 5, time.Minute)
+	p := New(addr.String(), "tcp", 5, time.Minute)
 	defer p.Close()
 
 	ctx := context.Background()
@@ -164,7 +164,7 @@ func TestPoolClosedReturnsErrClosed(t *testing.T) {
 	addr, cleanup := startTestUpstream(t, "tcp")
 	defer cleanup()
 
-	p := NewPool(addr.String(), "tcp", 5, time.Minute)
+	p := New(addr.String(), "tcp", 5, time.Minute)
 	p.Close()
 
 	_, err := p.Acquire(context.Background())
@@ -177,7 +177,7 @@ func TestPoolCloseClosesIdle(t *testing.T) {
 	addr, cleanup := startTestUpstream(t, "tcp")
 	defer cleanup()
 
-	p := NewPool(addr.String(), "tcp", 5, time.Minute)
+	p := New(addr.String(), "tcp", 5, time.Minute)
 
 	ctx := context.Background()
 	conn, err := p.Acquire(ctx)
@@ -201,7 +201,7 @@ func TestPoolSweeperEvictsStale(t *testing.T) {
 	addr, cleanup := startTestUpstream(t, "tcp")
 	defer cleanup()
 
-	p := NewPool(addr.String(), "tcp", 5, 50*time.Millisecond)
+	p := New(addr.String(), "tcp", 5, 50*time.Millisecond)
 	defer p.Close()
 
 	ctx := context.Background()
@@ -226,7 +226,7 @@ func TestPoolConcurrent(t *testing.T) {
 	addr, cleanup := startTestUpstream(t, "tcp")
 	defer cleanup()
 
-	p := NewPool(addr.String(), "tcp", 10, time.Minute)
+	p := New(addr.String(), "tcp", 10, time.Minute)
 	defer p.Close()
 
 	ctx := context.Background()
@@ -250,7 +250,7 @@ func TestPoolNoSweeperWhenDisabled(t *testing.T) {
 	addr, cleanup := startTestUpstream(t, "tcp")
 	defer cleanup()
 
-	p := NewPool(addr.String(), "tcp", 0, 0)
+	p := New(addr.String(), "tcp", 0, 0)
 	defer p.Close()
 
 	if p.stopCh == nil {

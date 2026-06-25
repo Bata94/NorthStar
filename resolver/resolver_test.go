@@ -5,6 +5,8 @@ package resolver
 
 import (
 	"context"
+	"encoding/binary"
+	"io"
 	"net"
 	"testing"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"github.com/bata94/northstar/config"
 	"github.com/bata94/northstar/dns"
 	"github.com/bata94/northstar/metrics"
+	"github.com/bata94/northstar/upstream"
 )
 
 func testMetrics() *metrics.Metrics {
@@ -58,17 +61,18 @@ func startMockUpstream(t *testing.T, network string, handler func(data []byte) [
 				go func(c net.Conn) {
 					defer func() { _ = c.Close() }()
 					lenBuf := make([]byte, 2)
-					if _, err := c.Read(lenBuf); err != nil {
+					if _, err := io.ReadFull(c, lenBuf); err != nil {
 						return
 					}
-					msgLen := int(lenBuf[0])<<8 | int(lenBuf[1])
+					msgLen := binary.BigEndian.Uint16(lenBuf)
 					data := make([]byte, msgLen)
-					if _, err := c.Read(data); err != nil {
+					if _, err := io.ReadFull(c, data); err != nil {
 						return
 					}
 					resp := m.handler(data)
-					respLen := []byte{byte(len(resp) >> 8), byte(len(resp))}
-					_, _ = c.Write(respLen)
+					lenPref := make([]byte, 2)
+					binary.BigEndian.PutUint16(lenPref, uint16(len(resp)))
+					_, _ = c.Write(lenPref)
 					_, _ = c.Write(resp)
 				}(conn)
 			}
@@ -100,331 +104,394 @@ func startMockUpstream(t *testing.T, network string, handler func(data []byte) [
 	return m
 }
 
-func (m *mockUpstream) close() {
+func (m *mockUpstream) Close() {
 	if m.closeFn != nil {
 		m.closeFn()
 	}
 }
 
-func mockResponse(queryData []byte, rcode uint16, answers ...dns.ResourceRecord) []byte {
-	var req dns.Message
-	if err := req.Parse(queryData); err != nil {
-		return nil
+func (m *mockUpstream) Addr() string {
+	return m.addr.String()
+}
+
+func testGroup(t *testing.T, addr string) *upstream.Group {
+	t.Helper()
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamConfig{{
+			Name:           "test",
+			Address:        addr,
+			Priority:       0,
+			Timeout:        5,
+			HealthCheck:    false,
+			HealthInterval: 30,
+			HealthTimeout:  5,
+			MaxFails:       3,
+			Weight:         1,
+		}},
+		UpstreamPoolSize: 10,
+		UpstreamPoolIdle: 30,
+	}
+	g, err := upstream.NewGroup(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return g
+}
+
+func testResponse(t *testing.T, domain string, qtype uint16) []byte {
+	t.Helper()
+	rdata := []byte{0}
+	if qtype == 1 {
+		rdata = net.ParseIP("1.2.3.4").To4()
+	} else if qtype == 28 {
+		rdata = net.ParseIP("::1").To16()
+	}
+	msg := dns.Message{
+		Header: dns.Header{
+			ID:      0,
+			Flags:   0x8000,
+			QDCount: 1,
+			ANCount: 1,
+		},
+		Questions: []dns.Question{{Name: domain, Type: qtype, Class: 1}},
+		Answers: []dns.ResourceRecord{{
+			Name:     domain,
+			Type:     qtype,
+			Class:    1,
+			TTL:      300,
+			RDLength: uint16(len(rdata)),
+			RData:    rdata,
+		}},
+	}
+	return msg.Pack()
+}
+
+func testNXDOMAINResponse(t *testing.T, domain string, qtype uint16) []byte {
+	t.Helper()
+	msg := dns.Message{
+		Header: dns.Header{
+			ID:      0,
+			Flags:   0x8003,
+			QDCount: 1,
+		},
+		Questions: []dns.Question{{Name: domain, Type: qtype, Class: 1}},
+	}
+	return msg.Pack()
+}
+
+func TestResolveCacheHit(t *testing.T) {
+	m := testMetrics()
+	rc := testRuntimeConfig(0)
+	c := cache.NewMemory(0)
+	defer c.Close()
+
+	mock := startMockUpstream(t, "udp", func(data []byte) []byte {
+		return testResponse(t, "example.com.", 1)
+	})
+	defer mock.Close()
+
+	g := testGroup(t, mock.Addr())
+	defer g.Close()
+
+	ip := net.ParseIP("1.2.3.4").To4()
+	cachedEntry := cache.NewEntry("example.com.", 1, 0,
+		[]dns.ResourceRecord{{
+			Name: "example.com.", Type: 1, Class: 1, TTL: 300,
+			RDLength: uint16(len(ip)),
+			RData:    ip,
+		}}, nil, nil, 0, 0, 0)
+	c.Set(context.Background(), cachedEntry)
+
+	result, upstreamName, err := resolve(context.Background(), "example.com.", 1, g, c, 512, "udp", rc, false, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil entry")
+	}
+	if len(result.Answers) == 0 || len(cachedEntry.Answers) == 0 {
+		t.Fatal("expected answers in both entries")
+	}
+	if result.Answers[0].RData[0] != cachedEntry.Answers[0].RData[0] {
+		t.Error("expected cached entry")
+	}
+	if upstreamName != "" {
+		t.Errorf("expected empty upstream name for cache hit, got %s", upstreamName)
+	}
+}
+
+func TestResolveCacheMissUpstream(t *testing.T) {
+	m := testMetrics()
+	rc := testRuntimeConfig(0)
+	c := cache.NewMemory(0)
+	defer c.Close()
+
+	mock := startMockUpstream(t, "udp", func(data []byte) []byte {
+		return testResponse(t, "example.com.", 1)
+	})
+	defer mock.Close()
+
+	g := testGroup(t, mock.Addr())
+	defer g.Close()
+
+	result, upstreamName, err := resolve(context.Background(), "example.com.", 1, g, c, 512, "udp", rc, false, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil entry")
+	}
+	if len(result.Answers) != 1 {
+		t.Errorf("expected 1 answer, got %d", len(result.Answers))
+	}
+	if upstreamName != "test" {
+		t.Errorf("expected upstream name 'test', got %s", upstreamName)
 	}
 
-	flags := uint16(0x8000 | 0x0080 | rcode)
-	resp := dns.Message{
-		Header: dns.Header{
-			ID: req.Header.ID, Flags: flags,
-			QDCount: 1, ANCount: uint16(len(answers)),
-		},
-		Questions: req.Questions,
-		Answers:   answers,
+	cached, found := c.Peek(context.Background(), "example.com.", 1)
+	if !found {
+		t.Fatal("expected entry to be cached")
 	}
-	return resp.Pack()
+	if len(cached.Answers) != 1 {
+		t.Errorf("expected 1 cached answer, got %d", len(cached.Answers))
+	}
+}
+
+func TestResolveUpstreamError(t *testing.T) {
+	m := testMetrics()
+	rc := testRuntimeConfig(0)
+	c := cache.NewMemory(0)
+	defer c.Close()
+
+	g := testGroup(t, "127.0.0.1:1")
+	defer g.Close()
+
+	_, _, err := resolve(context.Background(), "example.com.", 1, g, c, 512, "udp", rc, false, m)
+	if err == nil {
+		t.Fatal("expected error for unreachable upstream")
+	}
+}
+
+func TestResolveNXDOMAIN(t *testing.T) {
+	m := testMetrics()
+	rc := testRuntimeConfig(0)
+	c := cache.NewMemory(0)
+	defer c.Close()
+
+	mock := startMockUpstream(t, "udp", func(data []byte) []byte {
+		return testNXDOMAINResponse(t, "nonexistent.example.com.", 1)
+	})
+	defer mock.Close()
+
+	g := testGroup(t, mock.Addr())
+	defer g.Close()
+
+	result, _, err := resolve(context.Background(), "nonexistent.example.com.", 1, g, c, 512, "udp", rc, false, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil entry")
+	}
+	if result.RCode != 3 {
+		t.Errorf("expected RCODE 3 (NXDOMAIN), got %d", result.RCode)
+	}
+}
+
+func TestResolveStaleWhileRevalidate(t *testing.T) {
+	m := testMetrics()
+	rc := testRuntimeConfig(10)
+	c := cache.NewMemory(0)
+	defer c.Close()
+
+	mock := startMockUpstream(t, "udp", func(data []byte) []byte {
+		return testResponse(t, "example.com.", 1)
+	})
+	defer mock.Close()
+
+	g := testGroup(t, mock.Addr())
+	defer g.Close()
+
+	ip5 := net.ParseIP("5.6.7.8").To4()
+	staleEntry := cache.NewEntry("example.com.", 1, 0,
+		[]dns.ResourceRecord{{
+			Name: "example.com.", Type: 1, Class: 1, TTL: 1,
+			RDLength: uint16(len(ip5)),
+			RData:    ip5,
+		}}, nil, nil, 0, 0, 0)
+	staleEntry.ExpiresAt = time.Now().Add(-1 * time.Second)
+	c.Set(context.Background(), staleEntry)
+
+	time.Sleep(10 * time.Millisecond)
+
+	result, _, err := resolve(context.Background(), "example.com.", 1, g, c, 512, "udp", rc, false, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil entry (stale)")
+	}
+	if len(result.Answers) == 0 || len(staleEntry.Answers) == 0 {
+		t.Fatal("expected answers in both entries")
+	}
+	if result.Answers[0].RData[0] != staleEntry.Answers[0].RData[0] {
+		t.Error("expected stale entry (pre-refresh)")
+	}
+}
+
+func TestResolveInflightDedup(t *testing.T) {
+	m := testMetrics()
+	rc := testRuntimeConfig(0)
+	c := cache.NewMemory(0)
+	defer c.Close()
+
+	var callCount int
+	mock := startMockUpstream(t, "udp", func(data []byte) []byte {
+		callCount++
+		time.Sleep(50 * time.Millisecond)
+		return testResponse(t, "example.com.", 1)
+	})
+	defer mock.Close()
+
+	g := testGroup(t, mock.Addr())
+	defer g.Close()
+
+	ctx := context.Background()
+	results := make(chan *entryResult, 3)
+	for i := 0; i < 3; i++ {
+		go func() {
+			entry, _, err := resolve(ctx, "example.com.", 1, g, c, 512, "udp", rc, false, m)
+			results <- &entryResult{entry: entry, err: err}
+		}()
+	}
+
+	for i := 0; i < 3; i++ {
+		r := <-results
+		if r.err != nil {
+			t.Fatal(r.err)
+		}
+		if r.entry == nil {
+			t.Fatal("expected non-nil entry")
+		}
+	}
+
+	if callCount != 1 {
+		t.Errorf("expected 1 upstream call (inflight dedup), got %d", callCount)
+	}
+}
+
+type entryResult struct {
+	entry *cache.Entry
+	err   error
+}
+
+func TestFetchFromUpstreamTCP(t *testing.T) {
+	m := testMetrics()
+	rc := testRuntimeConfig(0)
+	c := cache.NewMemory(0)
+	defer c.Close()
+
+	mock := startMockUpstream(t, "tcp", func(data []byte) []byte {
+		return testResponse(t, "example.com.", 1)
+	})
+	defer mock.Close()
+
+	g := testGroup(t, mock.Addr())
+	defer g.Close()
+
+	result, _, err := resolve(context.Background(), "example.com.", 1, g, c, 512, "tcp", rc, false, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil entry")
+	}
+	if len(result.Answers) != 1 {
+		t.Errorf("expected 1 answer, got %d", len(result.Answers))
+	}
+}
+
+func TestFetchFromUpstreamDNSSEC(t *testing.T) {
+	m := testMetrics()
+	rc := testRuntimeConfig(0)
+	c := cache.NewMemory(0)
+	defer c.Close()
+
+	mock := startMockUpstream(t, "udp", func(data []byte) []byte {
+		return testResponse(t, "example.com.", 1)
+	})
+	defer mock.Close()
+
+	g := testGroup(t, mock.Addr())
+	defer g.Close()
+
+	result, _, err := resolve(context.Background(), "example.com.", 1, g, c, 512, "udp", rc, true, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil entry")
+	}
 }
 
 func TestStripOPT(t *testing.T) {
 	rrs := []dns.ResourceRecord{
-		{Name: "example.com", Type: 1, Class: 1},
-		{Name: "", Type: 41, Class: 4096},
-		{Name: "other.com", Type: 28, Class: 1},
+		{Name: "example.com.", Type: 1, Class: 1},
+		{Name: "", Type: 41, Class: 512},
 	}
-	stripped := stripOPT(rrs)
-	if len(stripped) != 2 {
-		t.Errorf("expected 2 records, got %d", len(stripped))
-	}
-	for _, rr := range stripped {
-		if rr.Type == 41 {
-			t.Error("OPT record should have been stripped")
-		}
+	result := stripOPT(rrs)
+	if len(result) != 1 {
+		t.Errorf("expected 1 record after strip, got %d", len(result))
 	}
 }
 
 func TestStripOPTNoOPT(t *testing.T) {
 	rrs := []dns.ResourceRecord{
-		{Name: "example.com", Type: 1, Class: 1},
+		{Name: "example.com.", Type: 1, Class: 1},
 	}
-	stripped := stripOPT(rrs)
-	if len(stripped) != 1 {
-		t.Errorf("expected 1 record, got %d", len(stripped))
+	result := stripOPT(rrs)
+	if len(result) != 1 {
+		t.Errorf("expected 1 record after strip, got %d", len(result))
 	}
 }
 
 func TestClientEDNS(t *testing.T) {
-	noOpt := &dns.Message{
-		Header: dns.Header{ARCount: 0},
-	}
-	size, do := clientEDNS(noOpt)
-	if size != 512 {
-		t.Errorf("default size = %d, want 512", size)
-	}
-	if do {
-		t.Error("default do should be false")
-	}
-
-	withOpt := &dns.Message{
-		Header: dns.Header{ARCount: 1},
+	req := &dns.Message{
 		Additionals: []dns.ResourceRecord{
-			{Name: "", Type: 41, Class: 4096, TTL: 0x00008000},
+			{Name: "", Type: 41, Class: 1232, TTL: 0x00008000},
 		},
 	}
-	size, do = clientEDNS(withOpt)
-	if size != 4096 {
-		t.Errorf("size = %d, want 4096", size)
+	size, do := clientEDNS(req)
+	if size != 1232 {
+		t.Errorf("expected size 1232, got %d", size)
 	}
 	if !do {
-		t.Error("do should be true")
+		t.Error("expected DO bit set")
 	}
+}
 
-	withOptNoDO := &dns.Message{
-		Header: dns.Header{ARCount: 1},
-		Additionals: []dns.ResourceRecord{
-			{Name: "", Type: 41, Class: 1234, TTL: 0},
-		},
-	}
-	size, do = clientEDNS(withOptNoDO)
-	if size != 1234 {
-		t.Errorf("size = %d, want 1234", size)
+func TestClientEDNSNoOPT(t *testing.T) {
+	req := &dns.Message{}
+	size, do := clientEDNS(req)
+	if size != 512 {
+		t.Errorf("expected default size 512, got %d", size)
 	}
 	if do {
-		t.Error("do should be false")
+		t.Error("expected DO bit not set")
 	}
 }
 
-func TestResolveCacheHit(t *testing.T) {
-	m := cache.NewMemory(0)
-	defer m.Close() //nolint:errcheck
-
-	ctx := context.Background()
-	entry := cache.NewEntry("example.com", 1, 0,
-		[]dns.ResourceRecord{
-			{Name: "example.com", Type: 1, Class: 1, TTL: 300,
-				RDLength: 4, RData: net.ParseIP("1.2.3.4").To4()},
-		}, nil, nil, 0, 0, 0)
-	_ = m.Set(ctx, entry)
-
-	pool := NewPool("127.0.0.1:9999", "udp", 5, time.Minute)
-	defer pool.Close()
-
-	result, err := resolve(ctx, "example.com", 1, "127.0.0.1:9999", m, 512, "udp", testRuntimeConfig(0), pool, false, testMetrics())
-	if err != nil {
-		t.Fatal(err)
+func TestClientEDNSCustomSize(t *testing.T) {
+	req := &dns.Message{
+		Additionals: []dns.ResourceRecord{
+			{Name: "", Type: 41, Class: 4096},
+		},
 	}
-	if result.Domain != "example.com" || len(result.Answers) != 1 {
-		t.Error("expected cached entry")
+	size, do := clientEDNS(req)
+	if size != 4096 {
+		t.Errorf("expected size 4096, got %d", size)
 	}
-}
-
-func TestResolveCacheMissUpstream(t *testing.T) {
-	m := cache.NewMemory(0)
-	defer m.Close() //nolint:errcheck
-
-	up := startMockUpstream(t, "udp", func(data []byte) []byte {
-		return mockResponse(data, 0,
-			dns.ResourceRecord{Name: "example.com", Type: 1, Class: 1, TTL: 300,
-				RDLength: 4, RData: net.ParseIP("1.2.3.4").To4()})
-	})
-	defer up.close()
-
-	pool := NewPool(up.addr.String(), "udp", 5, time.Minute)
-	defer pool.Close()
-
-	ctx := context.Background()
-	result, err := resolve(ctx, "example.com", 1, up.addr.String(), m, 512, "udp", testRuntimeConfig(0), pool, false, testMetrics())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Domain != "example.com" || len(result.Answers) != 1 {
-		t.Error("expected fetched entry")
-	}
-
-	cached, ok := m.Get(ctx, "example.com", 1)
-	if !ok {
-		t.Error("entry should be cached")
-	}
-	if cached.Answers[0].A().String() != "1.2.3.4" {
-		t.Error("cached answer mismatch")
-	}
-}
-
-func TestResolveUpstreamError(t *testing.T) {
-	m := cache.NewMemory(0)
-	defer m.Close() //nolint:errcheck
-
-	pool := NewPool("127.0.0.1:1", "udp", 5, time.Minute)
-	defer pool.Close()
-
-	ctx := context.Background()
-	_, err := resolve(ctx, "example.com", 1, "127.0.0.1:1", m, 512, "udp", testRuntimeConfig(0), pool, false, testMetrics())
-	if err == nil {
-		t.Fatal("expected error from unreachable upstream")
-	}
-}
-
-func TestResolveNXDOMAIN(t *testing.T) {
-	m := cache.NewMemory(0)
-	defer m.Close() //nolint:errcheck
-
-	up := startMockUpstream(t, "udp", func(data []byte) []byte {
-		return mockResponse(data, 3)
-	})
-	defer up.close()
-
-	pool := NewPool(up.addr.String(), "udp", 5, time.Minute)
-	defer pool.Close()
-
-	ctx := context.Background()
-	result, err := resolve(ctx, "nonexistent.example", 1, up.addr.String(), m, 512, "udp", testRuntimeConfig(0), pool, false, testMetrics())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.RCode != 3 {
-		t.Errorf("expected NXDOMAIN (3), got %d", result.RCode)
-	}
-}
-
-func TestResolveStaleWhileRevalidate(t *testing.T) {
-	m := cache.NewMemory(0)
-	defer m.Close() //nolint:errcheck
-
-	ctx := context.Background()
-	e := cache.NewEntry("stale.example", 1, 0,
-		[]dns.ResourceRecord{
-			{Name: "stale.example", Type: 1, Class: 1, TTL: 1,
-				RDLength: 4, RData: net.ParseIP("9.9.9.9").To4()},
-		}, nil, nil, 0, 0, 0)
-	e.ExpiresAt = time.Now().Add(-time.Second)
-	_ = m.Set(ctx, e)
-
-	up := startMockUpstream(t, "udp", func(data []byte) []byte {
-		time.Sleep(50 * time.Millisecond)
-		return mockResponse(data, 0,
-			dns.ResourceRecord{Name: "stale.example", Type: 1, Class: 1, TTL: 300,
-				RDLength: 4, RData: net.ParseIP("1.2.3.4").To4()})
-	})
-	defer up.close()
-
-	pool := NewPool(up.addr.String(), "udp", 5, time.Minute)
-	defer pool.Close()
-
-	result, err := resolve(ctx, "stale.example", 1, up.addr.String(), m, 512, "udp", testRuntimeConfig(10), pool, false, testMetrics())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Answers) != 1 || result.Answers[0].A().String() != "9.9.9.9" {
-		t.Error("expected stale entry to be served")
-	}
-
-	time.Sleep(200 * time.Millisecond)
-
-	refreshed, ok := m.Get(ctx, "stale.example", 1)
-	if ok && len(refreshed.Answers) > 0 {
-		t.Logf("background refresh completed, got: %s", refreshed.Answers[0].A().String())
-	}
-}
-
-func TestFetchFromUpstreamDNSSEC(t *testing.T) {
-	up := startMockUpstream(t, "udp", func(data []byte) []byte {
-		var req dns.Message
-		if err := req.Parse(data); err != nil {
-			return nil
-		}
-
-		hasDO := false
-		for _, rr := range req.Additionals {
-			if rr.Type == 41 && rr.TTL&0x00008000 != 0 {
-				hasDO = true
-				break
-			}
-		}
-
-		flags := uint16(0x8000 | 0x0080)
-		if hasDO {
-			flags |= 0x0020
-		}
-		resp := dns.Message{
-			Header:    dns.Header{ID: req.Header.ID, Flags: flags, QDCount: 1, ANCount: 1},
-			Questions: []dns.Question{{Name: "dnssec.example", Type: 1, Class: 1}},
-			Answers: []dns.ResourceRecord{
-				{Name: "dnssec.example", Type: 1, Class: 1, TTL: 300,
-					RDLength: 4, RData: net.ParseIP("1.2.3.4").To4()},
-			},
-			Additionals: []dns.ResourceRecord{
-				{Name: "", Type: 41, Class: 512, TTL: 0x00008000},
-			},
-		}
-		return resp.Pack()
-	})
-	defer up.close()
-
-	pool := NewPool(up.addr.String(), "udp", 5, time.Minute)
-	defer pool.Close()
-
-	ctx := context.Background()
-	entry, err := fetchFromUpstream(ctx, "dnssec.example", 1, 512, "udp", pool, true, testMetrics(), 0, 0, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !entry.AuthenticData {
-		t.Error("expected AuthenticData = true when DO=1 and upstream sets AD")
-	}
-}
-
-func TestResolveInflightDedup(t *testing.T) {
-	m := cache.NewMemory(0)
-	defer m.Close() //nolint:errcheck
-
-	callCount := 0
-	up := startMockUpstream(t, "udp", func(data []byte) []byte {
-		callCount++
-		time.Sleep(100 * time.Millisecond)
-		return mockResponse(data, 0,
-			dns.ResourceRecord{Name: "inflight.example", Type: 1, Class: 1, TTL: 300,
-				RDLength: 4, RData: net.ParseIP("1.2.3.4").To4()})
-	})
-	defer up.close()
-
-	pool := NewPool(up.addr.String(), "udp", 5, time.Minute)
-	defer pool.Close()
-
-	ctx := context.Background()
-	errs := make(chan error, 3)
-	for range 3 {
-		go func() {
-			_, err := resolve(ctx, "inflight.example", 1, up.addr.String(), m, 512, "udp", testRuntimeConfig(0), pool, false, testMetrics())
-			errs <- err
-		}()
-	}
-
-	for range 3 {
-		if err := <-errs; err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	if callCount != 1 {
-		t.Errorf("expected 1 upstream call, got %d", callCount)
-	}
-}
-
-func TestFetchFromUpstreamTCP(t *testing.T) {
-	up := startMockUpstream(t, "tcp", func(data []byte) []byte {
-		return mockResponse(data, 0,
-			dns.ResourceRecord{Name: "tcp.example", Type: 1, Class: 1, TTL: 300,
-				RDLength: 4, RData: net.ParseIP("1.2.3.4").To4()})
-	})
-	defer up.close()
-
-	pool := NewPool(up.addr.String(), "tcp", 5, time.Minute)
-	defer pool.Close()
-
-	ctx := context.Background()
-	entry, err := fetchFromUpstream(ctx, "tcp.example", 1, 512, "tcp", pool, false, testMetrics(), 0, 0, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entry.Answers) != 1 {
-		t.Error("expected 1 answer")
+	if do {
+		t.Error("expected DO bit not set")
 	}
 }

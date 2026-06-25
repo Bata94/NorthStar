@@ -18,6 +18,7 @@ import (
 	"github.com/bata94/northstar/log"
 	"github.com/bata94/northstar/metrics"
 	"github.com/bata94/northstar/resolver"
+	"github.com/bata94/northstar/upstream"
 )
 
 var Version = "dev"
@@ -105,15 +106,12 @@ func main() {
 
 	m := metrics.New()
 
-	poolIdle := time.Duration(cfg.UpstreamPoolIdle) * time.Second
-	udpPool := resolver.NewPool(cfg.UpstreamAddr, "udp", cfg.UpstreamPoolSize, poolIdle)
-	defer udpPool.Close()
-
-	var tcpPool *resolver.Pool
-	if !cfg.TcpDisable {
-		tcpPool = resolver.NewPool(cfg.UpstreamAddr, "tcp", cfg.UpstreamPoolSize, poolIdle)
-		defer tcpPool.Close()
+	upstreamGroup, err := upstream.NewGroup(&cfg)
+	if err != nil {
+		slog.Error("Failed to initialize upstream group", "error", err)
+		os.Exit(1)
 	}
+	defer upstreamGroup.Close()
 
 	resolver.SetPipeline(buildPipeline(&cfg, backend, m))
 
@@ -128,7 +126,7 @@ func main() {
 	go func() {
 		for range sighupCh {
 			slog.Warn("SIGHUP received, reloading config...")
-			reloadConfig(runtimeCfg, backend, m)
+			reloadConfig(runtimeCfg, upstreamGroup, backend, m)
 		}
 	}()
 
@@ -141,6 +139,9 @@ func main() {
 		}()
 	}
 
+	upstreamGroup.StartHealthChecks(ctx, m)
+	upstreamGroup.StartSpeedAssessment(ctx)
+
 	errCap := len(cfg.Listeners)
 	if !cfg.TcpDisable {
 		errCap *= 2
@@ -149,11 +150,11 @@ func main() {
 	for _, l := range cfg.Listeners {
 		l := l
 		go func() {
-			errChan <- resolver.Serve(ctx, l, cfg.UpstreamAddr, backend, runtimeCfg, udpPool, m)
+			errChan <- resolver.Serve(ctx, l, upstreamGroup, backend, runtimeCfg, m)
 		}()
 		if !cfg.TcpDisable {
 			go func() {
-				errChan <- resolver.ServeTCP(ctx, l, cfg.UpstreamAddr, backend, runtimeCfg, tcpPool, m, cfg.MaxTCPConnsPerClient)
+				errChan <- resolver.ServeTCP(ctx, l, upstreamGroup, backend, runtimeCfg, m, cfg.MaxTCPConnsPerClient)
 			}()
 		}
 	}
@@ -183,13 +184,18 @@ func buildPipeline(cfg *config.Config, c cache.Cache, m *metrics.Metrics) *hooks
 	return p
 }
 
-func reloadConfig(runtimeCfg *config.RuntimeConfig, c cache.Cache, m *metrics.Metrics) {
+func reloadConfig(runtimeCfg *config.RuntimeConfig, upstreamGroup *upstream.Group, c cache.Cache, m *metrics.Metrics) {
 	newCfg, err := config.Reload()
 	if err != nil {
 		slog.Error("Config reload failed", "error", err)
 		return
 	}
 	runtimeCfg.ApplyConfig(&newCfg)
+	if err := upstreamGroup.ReloadConfig(&newCfg); err != nil {
+		slog.Error("Upstream reload failed", "error", err)
+	}
+	upstreamGroup.StartHealthChecks(context.Background(), m)
+	upstreamGroup.StartSpeedAssessment(context.Background())
 	if newLogLevel, ok := runtimeCfg.LogLevel.Load().(string); ok {
 		newLogMode, _ := runtimeCfg.LogMode.Load().(string)
 		if newLogMode == "" {

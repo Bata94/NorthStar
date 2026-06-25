@@ -28,35 +28,57 @@ type HookConfig struct {
 	RateLimiting RateLimitHookConfig
 }
 
+type UpstreamConfig struct {
+	Name                string
+	Address             string
+	Priority            int
+	Timeout             int     // seconds, default 5
+	TCPOnly             bool
+	HealthCheck         bool    // default true
+	HealthInterval      int     // seconds, default 30
+	HealthTimeout       int     // seconds, default 5
+	MaxFails            int     // default 3
+	Weight              int     // default 1
+	AdaptiveTimeoutFactor float64 // multiplier for EWMA latency; 0 = disabled
+}
+
+type ConditionalRouteConfig struct {
+	Domain   string
+	Upstream string
+}
+
 type Config struct {
-	Mode             string
-	DNSPort          int
-	UpstreamAddr     string
-	CacheAddr        string
-	CacheFile        string
-	Listeners        []Listener
-	Ipv4Disable      bool
-	Ipv6Disable      bool
-	TcpDisable       bool
-	RateLimit        int
-	StaleAge         int
-	NegativeTTL      int
-	TTLMin           int
-	TTLMax           int
-	CacheMaxEntries  int
-	UpstreamPoolSize int
-	UpstreamPoolIdle int
-	LogLevel         string
-	LogMode          string
-	LogDir           string
-	LogRetention     int
-	TimeZone         string
-	CacheWarmup          bool
-	MaxTCPConnsPerClient int
-	MetricsEnable        bool
-	MetricsPort          int
-	ConfigPath       string
-	Hooks            HookConfig
+	Mode                string
+	DNSPort             int
+	UpstreamAddr        string // deprecated, use Upstreams
+	Upstreams           []UpstreamConfig
+	ConditionalRoutes   []ConditionalRouteConfig
+	UpstreamConcurrency int // number of upstreams to query in parallel (0/1 = disabled)
+	CacheAddr           string
+	CacheFile           string
+	Listeners           []Listener
+	Ipv4Disable         bool
+	Ipv6Disable         bool
+	TcpDisable          bool
+	RateLimit           int
+	StaleAge            int
+	NegativeTTL         int
+	TTLMin              int
+	TTLMax              int
+	CacheMaxEntries     int
+	UpstreamPoolSize    int
+	UpstreamPoolIdle    int
+	LogLevel            string
+	LogMode             string
+	LogDir              string
+	LogRetention        int
+	TimeZone            string
+	CacheWarmup             bool
+	MaxTCPConnsPerClient    int
+	MetricsEnable           bool
+	MetricsPort             int
+	ConfigPath          string
+	Hooks               HookConfig
 }
 
 func Load() Config {
@@ -109,9 +131,14 @@ func Load() Config {
 	}
 
 	applyEnvOverrides(&cfg)
+	migrateUpstreams(&cfg)
 
 	if cfg.Ipv4Disable && cfg.Ipv6Disable {
 		panic("No IP addresses provided. Please set either NORTHSTAR_DNS_IPV4_DISABLE or NORTHSTAR_DNS_IPV6_DISABLE to false")
+	}
+
+	if cfg.UpstreamConcurrency < 1 {
+		cfg.UpstreamConcurrency = 1
 	}
 
 	cfg.Listeners = buildListeners(cfg.DNSPort, cfg.Ipv4Disable, cfg.Ipv6Disable)
@@ -128,32 +155,33 @@ func Reload() (Config, error) {
 	}
 
 	cfg := Config{
-		ConfigPath:       cfgPath,
-		Mode:             "prod",
-		DNSPort:          53,
-		UpstreamAddr:     "8.8.8.8:53",
-		CacheAddr:        "",
-		CacheFile:        "",
-		Ipv4Disable:      false,
-		Ipv6Disable:      false,
-		TcpDisable:       false,
-		RateLimit:        0,
-		StaleAge:         60,
-		NegativeTTL:      0,
-		TTLMin:           0,
-		TTLMax:           0,
-		CacheMaxEntries:  0,
-		UpstreamPoolSize: 10,
-		UpstreamPoolIdle: 30,
-		LogLevel:         "",
-		LogMode:          "",
-		LogDir:           ".",
-		LogRetention:     7,
-		TimeZone:         "",
-		CacheWarmup:          false,
-		MaxTCPConnsPerClient: 0,
-		MetricsEnable:        false,
-		MetricsPort:          9153,
+		ConfigPath:          cfgPath,
+		Mode:                "prod",
+		DNSPort:             53,
+		UpstreamAddr:        "8.8.8.8:53",
+		CacheAddr:           "",
+		CacheFile:           "",
+		Ipv4Disable:         false,
+		Ipv6Disable:         false,
+		TcpDisable:          false,
+		RateLimit:           0,
+		StaleAge:            60,
+		NegativeTTL:         0,
+		TTLMin:              0,
+		TTLMax:              0,
+		CacheMaxEntries:     0,
+		UpstreamPoolSize:    10,
+		UpstreamPoolIdle:    30,
+		UpstreamConcurrency: 1,
+		LogLevel:            "",
+		LogMode:             "",
+		LogDir:              ".",
+		LogRetention:        7,
+		TimeZone:            "",
+		CacheWarmup:             false,
+		MaxTCPConnsPerClient:    0,
+		MetricsEnable:           false,
+		MetricsPort:             9153,
 		Hooks: HookConfig{
 			RateLimiting: RateLimitHookConfig{
 				Enabled:  false,
@@ -169,9 +197,14 @@ func Reload() (Config, error) {
 	}
 
 	applyEnvOverrides(&cfg)
+	migrateUpstreams(&cfg)
 
 	if cfg.Ipv4Disable && cfg.Ipv6Disable {
 		return cfg, fmt.Errorf("both IPv4 and IPv6 are disabled")
+	}
+
+	if cfg.UpstreamConcurrency < 1 {
+		cfg.UpstreamConcurrency = 1
 	}
 
 	cfg.Listeners = buildListeners(cfg.DNSPort, cfg.Ipv4Disable, cfg.Ipv6Disable)
@@ -200,6 +233,7 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v, ok := os.LookupEnv("NORTHSTAR_UPSTREAM"); ok {
 		cfg.UpstreamAddr = v
+		parseUpstreamEnv(cfg, v)
 	}
 	if v, ok := os.LookupEnv("NORTHSTAR_CACHE_ADDR"); ok {
 		cfg.CacheAddr = v
@@ -239,6 +273,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v, ok := os.LookupEnv("NORTHSTAR_UPSTREAM_POOL_IDLE"); ok {
 		cfg.UpstreamPoolIdle = atoiOrZero(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_UPSTREAM_CONCURRENCY"); ok {
+		cfg.UpstreamConcurrency = atoiOrZero(v)
 	}
 	if v, ok := os.LookupEnv("NORTHSTAR_LOG_LEVEL"); ok {
 		cfg.LogLevel = v
@@ -283,6 +320,64 @@ func atoiOrZero(s string) int {
 
 func isTrue(s string) bool {
 	return strings.EqualFold(s, "true")
+}
+
+func parseUpstreamEnv(cfg *Config, v string) {
+	if !strings.Contains(v, "=") {
+		return
+	}
+	var upstreams []UpstreamConfig
+	for _, entry := range strings.Split(v, ";") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		parts := strings.SplitN(entry, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		name := strings.TrimSpace(parts[0])
+		rest := strings.TrimSpace(parts[1])
+		fields := strings.SplitN(rest, ",", 2)
+		addr := strings.TrimSpace(fields[0])
+		priority := 0
+		if len(fields) > 1 {
+			priority = atoiOrZero(strings.TrimSpace(fields[1]))
+		}
+		if name == "" || addr == "" {
+			continue
+		}
+		upstreams = append(upstreams, UpstreamConfig{
+			Name:           name,
+			Address:        addr,
+			Priority:       priority,
+			Timeout:        5,
+			HealthCheck:    true,
+			HealthInterval: 30,
+			HealthTimeout:  5,
+			MaxFails:       3,
+			Weight:         1,
+		})
+	}
+	if len(upstreams) > 0 {
+		cfg.Upstreams = upstreams
+	}
+}
+
+func migrateUpstreams(cfg *Config) {
+	if len(cfg.Upstreams) == 0 && cfg.UpstreamAddr != "" {
+		cfg.Upstreams = []UpstreamConfig{{
+			Name:           "default",
+			Address:        cfg.UpstreamAddr,
+			Priority:       0,
+			Timeout:        5,
+			HealthCheck:    true,
+			HealthInterval: 30,
+			HealthTimeout:  5,
+			MaxFails:       3,
+			Weight:         1,
+		}}
+	}
 }
 
 func buildListeners(port int, disableIPv4, disableIPv6 bool) []Listener {

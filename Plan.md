@@ -203,13 +203,13 @@ cache negative answers, give operators TTL control.
 **Goal:** Multiple upstreams with health checking, failover, concurrent
 forwarding, and intelligent routing.
 
-- [ ] Multiple upstream entries in config + runtime
-- [ ] Health checking with automatic failover
-- [ ] Concurrent forwarding (configurable concurrency)
-- [ ] Periodic speed assessment + prefer fastest
-- [ ] Upstream priorities (primary / fallback tiers)
-- [ ] Adaptive timeouts per upstream
-- [ ] Conditional forwarding (`*.internal.corp` → private resolver)
+- [X] Multiple upstream entries in config + runtime
+- [X] Health checking with automatic failover
+- [X] Concurrent forwarding (configurable concurrency)
+- [X] Periodic speed assessment + prefer fastest
+- [X] Upstream priorities (primary / fallback tiers)
+- [X] Adaptive timeouts per upstream
+- [X] Conditional forwarding (`*.internal.corp` → private resolver)
 
 **Depends on:** Phase 1 (config file), Phase 2 (TCP limits for upstream)
 

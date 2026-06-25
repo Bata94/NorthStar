@@ -96,7 +96,7 @@ func TestMetricsHandlerServes(t *testing.T) {
 	m.QueriesTotal.WithLabelValues("28").Inc()
 	m.CacheLookups.Inc()
 	m.CacheHits.Inc()
-	m.UpstreamLatency.Observe(0.05)
+	m.UpstreamLatency.WithLabelValues("").Observe(0.05)
 	m.ErrorsTotal.WithLabelValues("servfail").Inc()
 	m.ActiveHandlers.Inc()
 	m.ActiveHandlers.Dec()

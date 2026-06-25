@@ -102,6 +102,7 @@ func readName(data []byte, off int, visited map[int]bool) (string, int, error) {
 }
 
 func writeName(buf *[]byte, name string, comp map[string]uint16) {
+	name = strings.TrimSuffix(name, ".")
 	if name == "" {
 		*buf = append(*buf, 0)
 		return
