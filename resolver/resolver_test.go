@@ -141,9 +141,10 @@ func testGroup(t *testing.T, addr string) *upstream.Group {
 func testResponse(t *testing.T, domain string, qtype uint16) []byte {
 	t.Helper()
 	rdata := []byte{0}
-	if qtype == 1 {
+	switch qtype {
+	case 1:
 		rdata = net.ParseIP("1.2.3.4").To4()
-	} else if qtype == 28 {
+	case 28:
 		rdata = net.ParseIP("::1").To16()
 	}
 	msg := dns.Message{
@@ -200,7 +201,7 @@ func TestResolveCacheHit(t *testing.T) {
 			RDLength: uint16(len(ip)),
 			RData:    ip,
 		}}, nil, nil, 0, 0, 0)
-	c.Set(context.Background(), cachedEntry)
+	_ = c.Set(context.Background(), cachedEntry)
 
 	result, upstreamName, err := resolve(context.Background(), "example.com.", 1, g, c, 512, "udp", rc, false, m)
 	if err != nil {
@@ -320,7 +321,7 @@ func TestResolveStaleWhileRevalidate(t *testing.T) {
 			RData:    ip5,
 		}}, nil, nil, 0, 0, 0)
 	staleEntry.ExpiresAt = time.Now().Add(-1 * time.Second)
-	c.Set(context.Background(), staleEntry)
+	_ = c.Set(context.Background(), staleEntry)
 
 	time.Sleep(10 * time.Millisecond)
 

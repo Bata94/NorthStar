@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"time"
 
@@ -50,15 +51,25 @@ func (d *DoQClient) Query(ctx context.Context, msg *dns.Message) (*dns.Message, 
 	if err != nil {
 		return nil, fmt.Errorf("doq dial: %w", err)
 	}
-	defer func() { _ = conn.CloseWithError(0, "") }()
+	defer func() {
+		if err := conn.CloseWithError(0, ""); err != nil {
+			slog.Debug("doq close connection error", "addr", d.addr, "error", err)
+		}
+	}()
 
 	stream, err := conn.OpenStreamSync(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("doq open stream: %w", err)
 	}
-	defer func() { _ = stream.Close() }()
+	defer func() {
+		if err := stream.Close(); err != nil {
+			slog.Debug("doq close stream error", "addr", d.addr, "error", err)
+		}
+	}()
 
-	_ = stream.SetWriteDeadline(time.Now().Add(d.timeout))
+	if err := stream.SetWriteDeadline(time.Now().Add(d.timeout)); err != nil {
+		slog.Debug("doq set write deadline error", "addr", d.addr, "error", err)
+	}
 
 	lenPref := make([]byte, 2+len(packed))
 	binary.BigEndian.PutUint16(lenPref, uint16(len(packed)))
@@ -68,7 +79,9 @@ func (d *DoQClient) Query(ctx context.Context, msg *dns.Message) (*dns.Message, 
 		return nil, fmt.Errorf("doq write: %w", err)
 	}
 
-	_ = stream.SetReadDeadline(time.Now().Add(d.timeout))
+	if err := stream.SetReadDeadline(time.Now().Add(d.timeout)); err != nil {
+		slog.Debug("doq set read deadline error", "addr", d.addr, "error", err)
+	}
 
 	lenBuf := make([]byte, 2)
 	if _, err := io.ReadFull(stream, lenBuf); err != nil {

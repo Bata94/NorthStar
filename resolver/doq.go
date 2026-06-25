@@ -30,7 +30,6 @@ func ServeDOQ(ctx context.Context, addr string, tlscfg *tls.Config, group *upstr
 	}
 	defer func() { _ = udpConn.Close() }()
 
-	// clone TLS config with ALPN for DoQ
 	tc := tlscfg.Clone()
 	tc.NextProtos = []string{"doq"}
 
@@ -41,7 +40,11 @@ func ServeDOQ(ctx context.Context, addr string, tlscfg *tls.Config, group *upstr
 	if err != nil {
 		return err
 	}
-	defer func() { _ = listener.Close() }()
+	defer func() {
+		if err := listener.Close(); err != nil {
+			slog.Error("DoQ listener close error", "error", err)
+		}
+	}()
 
 	slog.Warn("DoQ server listening", "addr", addr)
 
@@ -62,45 +65,61 @@ func ServeDOQ(ctx context.Context, addr string, tlscfg *tls.Config, group *upstr
 	}
 }
 
-func handleDOQConn(ctx context.Context, conn *quic.Conn, group *upstream.Group, c cache.Cache, runtimeCfg *config.RuntimeConfig, m *metrics.Metrics) {
-	defer func() { _ = conn.CloseWithError(0, "") }()
+func handleDOQConn(ctx context.Context, qconn *quic.Conn, group *upstream.Group, c cache.Cache, runtimeCfg *config.RuntimeConfig, m *metrics.Metrics) {
+	defer func() {
+		if err := qconn.CloseWithError(0, ""); err != nil {
+			slog.Debug("DoQ close connection error", "error", err)
+		}
+	}()
 
 	for {
-		stream, err := conn.AcceptStream(ctx)
+		stream, err := qconn.AcceptStream(ctx)
 		if err != nil {
 			return
 		}
 
 		go func() {
-			_ = stream.SetReadDeadline(time.Now().Add(10 * time.Second))
-			_ = stream.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := stream.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+				slog.Debug("DoQ set read deadline error", "error", err)
+			}
+			if err := stream.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+				slog.Debug("DoQ set write deadline error", "error", err)
+			}
 
 			lenBuf := make([]byte, 2)
 			if _, err := io.ReadFull(stream, lenBuf); err != nil {
-				_ = stream.Close()
+				if cerr := stream.Close(); cerr != nil {
+					slog.Debug("DoQ close stream after read error", "error", cerr)
+				}
 				return
 			}
 			msgLen := binary.BigEndian.Uint16(lenBuf)
 
 			data := make([]byte, msgLen)
 			if _, err := io.ReadFull(stream, data); err != nil {
-				_ = stream.Close()
+				if cerr := stream.Close(); cerr != nil {
+					slog.Debug("DoQ close stream after read error", "error", cerr)
+				}
 				return
 			}
 
 			var req dns.Message
 			if err := req.Parse(data); err != nil {
 				slog.Warn("Failed to parse DoQ request", "error", err)
-				_ = stream.Close()
+				if cerr := stream.Close(); cerr != nil {
+					slog.Debug("DoQ close stream after parse error", "error", cerr)
+				}
 				return
 			}
 
 			if len(req.Questions) == 0 {
-				_ = stream.Close()
+				if cerr := stream.Close(); cerr != nil {
+					slog.Debug("DoQ close stream no questions", "error", cerr)
+				}
 				return
 			}
 
-			clientIP := conn.RemoteAddr().String()
+			clientIP := qconn.RemoteAddr().String()
 			if host, _, err := net.SplitHostPort(clientIP); err == nil {
 				clientIP = host
 			}
@@ -112,7 +131,9 @@ func handleDOQConn(ctx context.Context, conn *quic.Conn, group *upstream.Group, 
 				binary.BigEndian.PutUint16(lenPref, uint16(len(resp)))
 				copy(lenPref[2:], resp)
 				_, err := stream.Write(lenPref)
-				_ = stream.Close()
+				if closeErr := stream.Close(); closeErr != nil {
+					slog.Debug("DoQ close stream after send error", "error", closeErr)
+				}
 				return err
 			}
 

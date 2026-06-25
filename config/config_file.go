@@ -127,54 +127,6 @@ func loadFile(path string) (*FileConfig, error) {
 	return &fc, nil
 }
 
-func applyFileUpstream(dst *UpstreamConfig, src *FileUpstreamConfig) {
-	if src.Name != nil {
-		dst.Name = *src.Name
-	}
-	if src.Address != nil {
-		dst.Address = *src.Address
-	}
-	if src.Priority != nil {
-		dst.Priority = *src.Priority
-	}
-	if src.Timeout != nil {
-		dst.Timeout = *src.Timeout
-	}
-	if src.TCPOnly != nil {
-		dst.TCPOnly = *src.TCPOnly
-	}
-	if src.TLS != nil {
-		dst.TLS = *src.TLS
-	}
-	if src.TLSServerName != nil {
-		dst.TLSServerName = *src.TLSServerName
-	}
-	if src.DoHURL != nil {
-		dst.DoHURL = *src.DoHURL
-	}
-	if src.DoQ != nil {
-		dst.DoQ = *src.DoQ
-	}
-	if src.HealthCheck != nil {
-		dst.HealthCheck = *src.HealthCheck
-	}
-	if src.HealthInterval != nil {
-		dst.HealthInterval = *src.HealthInterval
-	}
-	if src.HealthTimeout != nil {
-		dst.HealthTimeout = *src.HealthTimeout
-	}
-	if src.MaxFails != nil {
-		dst.MaxFails = *src.MaxFails
-	}
-	if src.Weight != nil {
-		dst.Weight = *src.Weight
-	}
-	if src.AdaptiveTimeoutFactor != nil {
-		dst.AdaptiveTimeoutFactor = *src.AdaptiveTimeoutFactor
-	}
-}
-
 func fileUpstreamToConfig(src *FileUpstreamConfig) UpstreamConfig {
 	var dst UpstreamConfig
 	if src.Name != nil {

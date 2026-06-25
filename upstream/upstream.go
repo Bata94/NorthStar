@@ -30,10 +30,6 @@ type Upstream struct {
 	healthy     atomic.Bool
 	failCount   atomic.Int64
 	ewmaLatency atomic.Int64 // nanoseconds
-
-	mu         sync.Mutex
-	probesSent int
-	probesOK   int
 }
 
 const ewmaAlpha = 0.2

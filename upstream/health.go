@@ -146,9 +146,15 @@ func (hc *HealthChecker) probe() {
 		}
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			slog.Debug("Health probe close error", "upstream", u.Name, "error", err)
+		}
+	}()
 
-	_ = conn.SetDeadline(time.Now().Add(probeTO))
+	if err := conn.SetDeadline(time.Now().Add(probeTO)); err != nil {
+		slog.Debug("Health probe deadline error", "upstream", u.Name, "error", err)
+	}
 
 	query := buildProbeQuery()
 	if _, err := conn.Write(query); err != nil {
