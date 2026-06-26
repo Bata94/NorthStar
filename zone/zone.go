@@ -428,17 +428,23 @@ type Zone struct {
 	Records    []Record
 	DNSSEC     *DNSSECConfig
 	SigningKey crypto.Signer
+	ZSKKey     crypto.Signer
 	Views      []*ZoneView
+	Rollover   *ZoneRollover
 
 	byName map[string][]Record
 }
 
-func New(name string, records []Record, dnssec *DNSSECConfig, signingKey crypto.Signer, views []*ZoneView) *Zone {
+func New(name string, records []Record, dnssec *DNSSECConfig, signingKey, zskKey crypto.Signer, views []*ZoneView) *Zone {
+	if zskKey == nil {
+		zskKey = signingKey
+	}
 	z := &Zone{
 		Name:       name,
 		Records:    records,
 		DNSSEC:     dnssec,
 		SigningKey: signingKey,
+		ZSKKey:     zskKey,
 		Views:      views,
 		byName:     make(map[string][]Record),
 	}

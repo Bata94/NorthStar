@@ -220,11 +220,20 @@ type FileZoneViewConfig struct {
 	Records []FileZoneRecordConfig `yaml:"records,omitempty"`
 }
 
+type FileZoneRolloverConfig struct {
+	Enabled    *bool `yaml:"enabled"`
+	ZSKDays    *int  `yaml:"zsk_days,omitempty"`
+	KSKDays    *int  `yaml:"ksk_days,omitempty"`
+	Overlap    *int  `yaml:"overlap_days,omitempty"`
+	PrePublish *int  `yaml:"pre_publish_days,omitempty"`
+}
+
 type FileZoneConfig struct {
-	Name    *string                `yaml:"name"`
-	Records []FileZoneRecordConfig `yaml:"records,omitempty"`
-	DNSSEC  *FileZoneDNSSECConfig  `yaml:"dnssec,omitempty"`
-	Views   []FileZoneViewConfig   `yaml:"views,omitempty"`
+	Name     *string                 `yaml:"name"`
+	Records  []FileZoneRecordConfig  `yaml:"records,omitempty"`
+	DNSSEC   *FileZoneDNSSECConfig   `yaml:"dnssec,omitempty"`
+	Rollover *FileZoneRolloverConfig `yaml:"rollover,omitempty"`
+	Views    []FileZoneViewConfig    `yaml:"views,omitempty"`
 }
 
 type FileACLConfig struct {
@@ -1035,6 +1044,24 @@ func configToFile(cfg *Config) *FileConfig {
 			}
 			fz.DNSSEC = fd
 		}
+		if z.Rollover != nil {
+			fr := &FileZoneRolloverConfig{
+				Enabled: &z.Rollover.Enabled,
+			}
+			if z.Rollover.ZSKDays != 0 {
+				fr.ZSKDays = &z.Rollover.ZSKDays
+			}
+			if z.Rollover.KSKDays != 0 {
+				fr.KSKDays = &z.Rollover.KSKDays
+			}
+			if z.Rollover.Overlap != 0 {
+				fr.Overlap = &z.Rollover.Overlap
+			}
+			if z.Rollover.PrePublish != 0 {
+				fr.PrePublish = &z.Rollover.PrePublish
+			}
+			fz.Rollover = fr
+		}
 		if len(z.Views) > 0 {
 			fileViews := make([]FileZoneViewConfig, len(z.Views))
 			for vi, v := range z.Views {
@@ -1340,6 +1367,25 @@ func applyFileZones(cfg *Config, fc *FileConfig) {
 				d.NSEC3 = n3
 			}
 			cfg.Zones[i].DNSSEC = d
+		}
+		if fz.Rollover != nil {
+			r := &ZoneRolloverConfig{}
+			if fz.Rollover.Enabled != nil {
+				r.Enabled = *fz.Rollover.Enabled
+			}
+			if fz.Rollover.ZSKDays != nil {
+				r.ZSKDays = *fz.Rollover.ZSKDays
+			}
+			if fz.Rollover.KSKDays != nil {
+				r.KSKDays = *fz.Rollover.KSKDays
+			}
+			if fz.Rollover.Overlap != nil {
+				r.Overlap = *fz.Rollover.Overlap
+			}
+			if fz.Rollover.PrePublish != nil {
+				r.PrePublish = *fz.Rollover.PrePublish
+			}
+			cfg.Zones[i].Rollover = r
 		}
 		if len(fz.Views) > 0 {
 			cfg.Zones[i].Views = make([]ZoneViewConfig, len(fz.Views))

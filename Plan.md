@@ -524,15 +524,15 @@ Phase 10 (multi-node deployment to benefit from tracing)
 
 **Goal:** Deeper protocol compliance and DNSSEC lifecycle management.
 
-- [ ] EDNS padding (RFC 7830) — add configurable padding to EDNS
+- [X] EDNS padding (RFC 7830) — add configurable padding to EDNS
   options for query privacy over encrypted transports
-- [ ] DNSSEC trust anchor management (RFC 5011) — automated
+- [X] DNSSEC trust anchor management (RFC 5011) — automated
   maintenance of root trust anchor with RFC 5011 compliant
   key rollover tracking
-- [ ] NSEC3 support — implement NSEC3 hash computation (SHA-1
+- [X] NSEC3 support — implement NSEC3 hash computation (SHA-1
   with configurable iterations and salt) for authenticated
   denial of existence in authoritative zones
-- [ ] DNSSEC key rollover (KSK/ZSK) — automated key rotation with
+- [X] DNSSEC key rollover (KSK/ZSK) — automated key rotation with
   overlap period, DS record publication timing, and zero-downtime
   re-signing of zone records
 

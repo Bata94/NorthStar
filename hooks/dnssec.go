@@ -1,6 +1,3 @@
-// Copyright (c) 2026 bata94
-// SPDX-License-Identifier: MIT WITH Commons-Clause
-
 package hooks
 
 import (
@@ -15,15 +12,29 @@ type DnssecHook struct {
 	priority    int
 	validation  string
 	trustAnchor string
+
+	anchorStore *dns.TrustAnchorStore
+	storeLoaded bool
 }
 
 func NewDnssecHook(enabled bool, priority int, validation, trustAnchor string) *DnssecHook {
-	return &DnssecHook{
+	h := &DnssecHook{
 		enabled:     enabled,
 		priority:    priority,
 		validation:  validation,
 		trustAnchor: trustAnchor,
 	}
+	if enabled && trustAnchor != "" {
+		store := dns.NewTrustAnchorStore(0, 0)
+		if err := store.LoadFile(trustAnchor); err != nil {
+			slog.Warn("DNSSEC: failed to load trust anchor file, chain validation disabled", "path", trustAnchor, "error", err)
+		} else {
+			h.anchorStore = store
+			h.storeLoaded = true
+			slog.Info("DNSSEC: trust anchors loaded", "path", trustAnchor, "count", len(store.GetValid()))
+		}
+	}
+	return h
 }
 
 func (h *DnssecHook) Name() string {
@@ -65,6 +76,8 @@ func (h *DnssecHook) Handle(ctx *Context) error {
 		return nil
 	}
 
+	_, dsRecords := extractDSRecords(ctx.Entry.Authorities)
+
 	matched := 0
 	for typeCovered, sigs := range rrsigs {
 		rrset := rrsets[typeCovered]
@@ -86,6 +99,23 @@ func (h *DnssecHook) Handle(ctx *Context) error {
 			if err != nil {
 				slog.Debug("DNSSEC: failed to extract public key", "signer", sig.SignerName, "error", err)
 				continue
+			}
+
+			if h.storeLoaded {
+				if !dns.VerifyChain(h.anchorStore, dsRecords, dnskey, sig.SignerName) {
+					slog.Debug("DNSSEC: chain-of-trust verification failed", "signer", sig.SignerName, "keytag", sig.KeyTag)
+					if ctx.Metrics != nil {
+						ctx.Metrics.DnssecValidationStatus.WithLabelValues("failure").Inc()
+					}
+					if h.validation == "required" {
+						slog.Warn("DNSSEC: required chain validation failed, returning SERVFAIL", "domain", ctx.Request.Question())
+						return ErrHookStop
+					}
+					return nil
+				}
+				if h.anchorStore.IsTrusted(sig.KeyTag) {
+					h.anchorStore.Observe(*dnskey, sig.SignerName)
+				}
 			}
 
 			if err := dns.VerifyRRSIG(rrset, sig, pubKey); err != nil {
@@ -157,4 +187,18 @@ func findDNSKEY(rrs []dns.ResourceRecord, signerName string, keyTag uint16) *dns
 		}
 	}
 	return nil
+}
+
+func extractDSRecords(rrs []dns.ResourceRecord) ([]*dns.DS, []*dns.DS) {
+	var dsRecords []*dns.DS
+	for _, rr := range rrs {
+		if rr.Type == dns.TypeDS {
+			ds, err := dns.ParseDS(&rr)
+			if err != nil {
+				continue
+			}
+			dsRecords = append(dsRecords, ds)
+		}
+	}
+	return dsRecords, dsRecords
 }

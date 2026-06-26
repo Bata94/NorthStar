@@ -51,6 +51,7 @@ func ParseZoneConfig(cfg config.ZoneConfig) (*Zone, error) {
 
 	var dnssec *DNSSECConfig
 	var signingKey crypto.Signer
+	var zskKey crypto.Signer
 	if cfg.DNSSEC != nil && cfg.DNSSEC.Enabled {
 		alg := algorithmFromString(cfg.DNSSEC.Algorithm)
 		nsec3Enabled := cfg.DNSSEC.NSEC3 != nil && cfg.DNSSEC.NSEC3.Enabled
@@ -65,18 +66,27 @@ func ParseZoneConfig(cfg config.ZoneConfig) (*Zone, error) {
 			var lerr error
 			signingKey, lerr = LoadKey(cfg.DNSSEC.KeyFile)
 			if lerr != nil {
-				return nil, fmt.Errorf("load signing key for zone %q: %w", cfg.Name, lerr)
+				return nil, fmt.Errorf("load KSK for zone %q: %w", cfg.Name, lerr)
 			}
 		} else {
 			var gerr error
 			signingKey, gerr = GenerateKey("", alg)
 			if gerr != nil {
-				return nil, fmt.Errorf("generate signing key for zone %q: %w", cfg.Name, gerr)
+				return nil, fmt.Errorf("generate KSK for zone %q: %w", cfg.Name, gerr)
 			}
+		}
+		if cfg.DNSSEC.ZSKFile != "" {
+			var lerr error
+			zskKey, lerr = LoadKey(cfg.DNSSEC.ZSKFile)
+			if lerr != nil {
+				return nil, fmt.Errorf("load ZSK for zone %q: %w", cfg.Name, lerr)
+			}
+		} else {
+			zskKey = signingKey
 		}
 	}
 
-	return New(name, records, dnssec, signingKey, views), nil
+	return New(name, records, dnssec, signingKey, zskKey, views), nil
 }
 
 func parseRecordConfig(rc config.ZoneRecordConfig, zone string) ([]Record, error) {

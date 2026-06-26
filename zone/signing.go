@@ -555,22 +555,69 @@ func AttachDNSSEC(zone *Zone, resp *dns.Message, req *dns.Message, key crypto.Si
 		return resp
 	}
 
-	pubKey := BuildDNSKEYRecord(zone.Name, key, zone.DNSSEC.Algorithm, zone.SOA().TTLSec)
-	if pubKey == nil {
-		return resp
+	ksk := key
+	zsk := zone.ZSKKey
+	if zsk == nil {
+		zsk = ksk
 	}
 
-	pubKeyWire, err := pubKey.RData()
+	kskPub := BuildDNSKEYRecord(zone.Name, ksk, zone.DNSSEC.Algorithm, zone.SOA().TTLSec)
+	if kskPub == nil {
+		return resp
+	}
+	kskPub.Flags = 257
+
+	kskWire, err := kskPub.RData()
 	if err != nil {
 		return resp
 	}
-	dnskeyTag := ComputeKeyTag(pubKeyWire, zone.DNSSEC.Algorithm, zone.Name)
+	kskTag := ComputeKeyTag(kskWire, zone.DNSSEC.Algorithm, zone.Name)
 
-	// Group answer records by name+type for signing
+	var zskPub *DNSKEYRecord
+	var zskTag uint16
+	useSeparateZSK := ksk != zsk
+	if useSeparateZSK {
+		zskPub = BuildDNSKEYRecord(zone.Name, zsk, zone.DNSSEC.Algorithm, zone.SOA().TTLSec)
+		if zskPub == nil {
+			zskPub = kskPub
+			zskTag = kskTag
+		} else {
+			zskPub.Flags = 256
+			zskWire, zerr := zskPub.RData()
+			if zerr != nil {
+				zskPub = kskPub
+				zskTag = kskTag
+			} else {
+				zskTag = ComputeKeyTag(zskWire, zone.DNSSEC.Algorithm, zone.Name)
+			}
+		}
+	} else {
+		zskPub = kskPub
+		zskTag = kskTag
+	}
+
+	var extraZSKs []*DNSKEYRecord
+	if zone.Rollover != nil {
+		phase := zone.Rollover.Phase()
+		if phase == RolloverActive {
+			if oldRec := zone.Rollover.OldDNSKEYRecord(); oldRec != nil {
+				extraZSKs = append(extraZSKs, oldRec)
+			}
+		}
+		if phase == RolloverPublishing {
+			if newKey := zone.Rollover.NewZSK(); newKey != nil {
+				nr := BuildDNSKEYRecord(zone.Name, newKey, zone.DNSSEC.Algorithm, zone.SOA().TTLSec)
+				if nr != nil {
+					nr.Flags = 256
+					extraZSKs = append(extraZSKs, nr)
+				}
+			}
+		}
+	}
+
 	type sigKey struct{ name, rtype string }
 	answerGroups := make(map[sigKey][]Record)
 	for _, ans := range resp.Answers {
-		// Find matching Record in zone
 		for _, r := range zone.byName[ans.Name] {
 			if r.DNSType() == ans.Type {
 				key := sigKey{ans.Name, fmt.Sprintf("%d", ans.Type)}
@@ -582,7 +629,7 @@ func AttachDNSSEC(zone *Zone, resp *dns.Message, req *dns.Message, key crypto.Si
 
 	var addlRRSIGs []dns.ResourceRecord
 	for _, group := range answerGroups {
-		rrsig, err := SignRRset(group, zone.Name, key, zone.DNSSEC.Algorithm, dnskeyTag)
+		rrsig, err := SignRRset(group, zone.Name, zsk, zone.DNSSEC.Algorithm, zskTag)
 		if err != nil {
 			continue
 		}
@@ -600,10 +647,9 @@ func AttachDNSSEC(zone *Zone, resp *dns.Message, req *dns.Message, key crypto.Si
 		})
 	}
 
-	// Sign SOA if in authority
 	soaRecords := findSOARecords(zone)
 	if len(soaRecords) > 0 {
-		rrsig, err := SignRRset(soaRecords, zone.Name, key, zone.DNSSEC.Algorithm, dnskeyTag)
+		rrsig, err := SignRRset(soaRecords, zone.Name, zsk, zone.DNSSEC.Algorithm, zskTag)
 		if err == nil {
 			rdata, _ := rrsig.RData()
 			addlRRSIGs = append(addlRRSIGs, dns.ResourceRecord{
@@ -617,10 +663,8 @@ func AttachDNSSEC(zone *Zone, resp *dns.Message, req *dns.Message, key crypto.Si
 		}
 	}
 
-	// Add RRSIGs for negative responses (authority SOA)
 	respRrsigs := addlRRSIGs
 
-	// Build NSEC(3) chain and include if NXDOMAIN
 	if resp.Header.Flags&0x000F == 3 {
 		if zone.DNSSEC.NSEC3 {
 			iterations := uint16(0)
@@ -637,7 +681,6 @@ func AttachDNSSEC(zone *Zone, resp *dns.Message, req *dns.Message, key crypto.Si
 					RData:    rdata,
 				})
 			}
-			// Include NSEC3PARAM in additional section per RFC 5155 §3
 			param := BuildNSEC3PARAMRecord(zone, iterations, salt)
 			prdata, _ := param.RData()
 			resp.Additionals = append(resp.Additionals, dns.ResourceRecord{
@@ -666,15 +709,58 @@ func AttachDNSSEC(zone *Zone, resp *dns.Message, req *dns.Message, key crypto.Si
 
 	resp.Answers = append(resp.Answers, respRrsigs...)
 
-	pubRData, _ := pubKey.RData()
+	if useSeparateZSK {
+		zskRData, _ := zskPub.RData()
+		resp.Additionals = append(resp.Additionals, dns.ResourceRecord{
+			Name:     zone.Name,
+			Type:     dns.TypeDNSKEY,
+			Class:    1,
+			TTL:      zskPub.TTL(),
+			RDLength: uint16(len(zskRData)),
+			RData:    zskRData,
+		})
+	}
+	for _, extra := range extraZSKs {
+		erData, _ := extra.RData()
+		resp.Additionals = append(resp.Additionals, dns.ResourceRecord{
+			Name:     zone.Name,
+			Type:     dns.TypeDNSKEY,
+			Class:    1,
+			TTL:      extra.TTL(),
+			RDLength: uint16(len(erData)),
+			RData:    erData,
+		})
+	}
+
+	kskRData, _ := kskPub.RData()
 	resp.Additionals = append([]dns.ResourceRecord{{
 		Name:     zone.Name,
 		Type:     dns.TypeDNSKEY,
 		Class:    1,
-		TTL:      pubKey.TTL(),
-		RDLength: uint16(len(pubRData)),
-		RData:    pubRData,
+		TTL:      kskPub.TTL(),
+		RDLength: uint16(len(kskRData)),
+		RData:    kskRData,
 	}}, resp.Additionals...)
+
+	kdns := []Record{kskPub}
+	if useSeparateZSK {
+		kdns = append(kdns, zskPub)
+	}
+	for _, extra := range extraZSKs {
+		kdns = append(kdns, extra)
+	}
+	dnskeySig, err := SignRRset(kdns, zone.Name, ksk, zone.DNSSEC.Algorithm, kskTag)
+	if err == nil {
+		sigRData, _ := dnskeySig.RData()
+		resp.Additionals = append(resp.Additionals, dns.ResourceRecord{
+			Name:     zone.Name,
+			Type:     dns.TypeRRSIG,
+			Class:    1,
+			TTL:      dnskeySig.TTL(),
+			RDLength: uint16(len(sigRData)),
+			RData:    sigRData,
+		})
+	}
 
 	resp.Header.ARCount = uint16(len(resp.Additionals))
 	resp.Header.ANCount = uint16(len(resp.Answers))

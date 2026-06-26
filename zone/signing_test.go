@@ -159,7 +159,7 @@ func TestBuildNSECChain(t *testing.T) {
 		&ARecord{Name: "example.com.", TTLSec: 300, IP: net.ParseIP("192.0.2.1")},
 		&ARecord{Name: "www.example.com.", TTLSec: 300, IP: net.ParseIP("192.0.2.2")},
 		&MXRecord{Name: "example.com.", TTLSec: 300, Preference: 10, Host: "mail.example.com."},
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil)
 
 	chain := BuildNSECChain(z)
 	if len(chain) == 0 {
@@ -195,7 +195,7 @@ func TestAttachDNSSEC(t *testing.T) {
 	}, &DNSSECConfig{
 		Enabled:   true,
 		Algorithm: dns.AlgECDSAP256,
-	}, key, nil)
+	}, key, nil, nil)
 
 	req := &dns.Message{
 		Header: dns.Header{ID: 42, Flags: 0x0100, QDCount: 1},
@@ -247,7 +247,7 @@ func TestAttachDNSSECNoDOBit(t *testing.T) {
 	}, &DNSSECConfig{
 		Enabled:   true,
 		Algorithm: dns.AlgECDSAP256,
-	}, nil, nil)
+	}, nil, nil, nil)
 
 	req := &dns.Message{
 		Header: dns.Header{ID: 42, Flags: 0x0100, QDCount: 1},
@@ -369,7 +369,7 @@ func TestBuildNSEC3Chain(t *testing.T) {
 		},
 		&ARecord{Name: "example.com.", TTLSec: 300, IP: net.ParseIP("192.0.2.1")},
 		&ARecord{Name: "www.example.com.", TTLSec: 300, IP: net.ParseIP("192.0.2.2")},
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil)
 
 	chain := BuildNSEC3Chain(z, 0, nil, false)
 	if len(chain) == 0 {
@@ -406,7 +406,7 @@ func TestBuildNSEC3ChainWithSalt(t *testing.T) {
 			Serial: 1, Refresh: 3600, Retry: 900, Expire: 86400, Minimum: 3600,
 		},
 		&ARecord{Name: "example.com.", TTLSec: 300, IP: net.ParseIP("192.0.2.1")},
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil)
 
 	chain := BuildNSEC3Chain(z, 10, salt, false)
 	if len(chain) == 0 {
@@ -431,7 +431,7 @@ func TestBuildNSEC3ChainWithOptOut(t *testing.T) {
 		},
 		&ARecord{Name: "example.com.", TTLSec: 300, IP: net.ParseIP("192.0.2.1")},
 		&NSRecord{Name: "sub.example.com.", TTLSec: 3600, Target: "ns1.sub.example.com."},
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil)
 
 	chain := BuildNSEC3Chain(z, 0, nil, true)
 	if len(chain) == 0 {
@@ -451,7 +451,7 @@ func TestBuildNSEC3ChainWithOptOut(t *testing.T) {
 }
 
 func TestBuildNSEC3ChainEmptyZone(t *testing.T) {
-	z := New("empty.zone.", nil, nil, nil, nil)
+	z := New("empty.zone.", nil, nil, nil, nil, nil)
 	chain := BuildNSEC3Chain(z, 0, nil, false)
 	if chain != nil {
 		t.Fatal("expected nil chain for empty zone")
@@ -473,7 +473,7 @@ func TestBuildNSEC3ChainOnlyRRSIG(t *testing.T) {
 			SigExpiration: 2000000000, SigInception: 1000000000, KeyTag: 12345,
 			SignerName: "example.com.", Signature: []byte("fake"),
 		},
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil)
 
 	chain := BuildNSEC3Chain(z, 0, nil, false)
 	if len(chain) == 0 {
@@ -496,7 +496,7 @@ func TestBuildNSEC3PARAMRecord(t *testing.T) {
 			MName: "ns1.example.com.", RName: "admin.example.com.",
 			Serial: 1, Refresh: 3600, Retry: 900, Expire: 86400, Minimum: 3600,
 		},
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil)
 
 	param := BuildNSEC3PARAMRecord(z, 10, []byte{0xde, 0xad})
 	if param == nil {
@@ -543,7 +543,7 @@ func TestAttachDNSSECWithNSEC3(t *testing.T) {
 		Enabled:   true,
 		Algorithm: dns.AlgECDSAP256,
 		NSEC3:     true,
-	}, key, nil)
+	}, key, nil, nil)
 
 	req := &dns.Message{
 		Header: dns.Header{ID: 42, Flags: 0x0100, QDCount: 1},
@@ -603,7 +603,7 @@ func TestAttachDNSSECWithNSEC3NXDOMAIN(t *testing.T) {
 		Enabled:   true,
 		Algorithm: dns.AlgECDSAP256,
 		NSEC3:     true,
-	}, key, nil)
+	}, key, nil, nil)
 
 	req := &dns.Message{
 		Header: dns.Header{ID: 1, Flags: 0x0100, QDCount: 1},
@@ -663,7 +663,7 @@ func TestAttachDNSSECNSEC3CoveringTypes(t *testing.T) {
 		Enabled:   true,
 		Algorithm: dns.AlgECDSAP256,
 		NSEC3:     true,
-	}, key, nil)
+	}, key, nil, nil)
 
 	// Query for a non-existent name to trigger NXDOMAIN with NSEC3
 	req := &dns.Message{

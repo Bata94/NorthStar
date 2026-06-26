@@ -130,6 +130,14 @@ type EcsHookConfig struct {
 	PrefixV6 int // source prefix length for IPv6 (default 56)
 }
 
+type ZoneRolloverConfig struct {
+	Enabled    bool // enable automatic key rollover
+	ZSKDays    int  // ZSK lifetime in days (default 30)
+	KSKDays    int  // KSK lifetime in days (default 365)
+	Overlap    int  // overlap period in days for double-signature (default 7)
+	PrePublish int  // pre-publish period in days for ZSK (default 2)
+}
+
 type DnssecHookConfig struct {
 	Enabled     bool
 	Priority    int
@@ -214,10 +222,11 @@ type ZoneViewConfig struct {
 }
 
 type ZoneConfig struct {
-	Name    string             `yaml:"name"`
-	Records []ZoneRecordConfig `yaml:"records"`
-	DNSSEC  *ZoneDNSSECConfig  `yaml:"dnssec,omitempty"`
-	Views   []ZoneViewConfig   `yaml:"views,omitempty"`
+	Name     string              `yaml:"name"`
+	Records  []ZoneRecordConfig  `yaml:"records"`
+	DNSSEC   *ZoneDNSSECConfig   `yaml:"dnssec,omitempty"`
+	Rollover *ZoneRolloverConfig `yaml:"rollover,omitempty"`
+	Views    []ZoneViewConfig    `yaml:"views,omitempty"`
 }
 
 type ACLConfig struct {
