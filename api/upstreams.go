@@ -9,21 +9,25 @@ import (
 )
 
 type upstreamInput struct {
-	Name       string   `json:"name"`
-	Address    string   `json:"address"`
-	Priority   *int     `json:"priority"`
-	Timeout    *int     `json:"timeout"`
-	TCPOnly    *bool    `json:"tcp_only"`
-	TLS        *bool    `json:"tls"`
-	TLSServer  *string  `json:"tls_server_name"`
-	DoHURL     *string  `json:"doh_url"`
-	DoQ        *bool    `json:"doq"`
-	HealthChk  *bool    `json:"health_check"`
-	HealthInt  *int     `json:"health_interval"`
-	HealthTO   *int     `json:"health_timeout"`
-	MaxFails   *int     `json:"max_fails"`
-	Weight     *int     `json:"weight"`
-	AdaptiveTF *float64 `json:"adaptive_timeout_factor"`
+	Name                string   `json:"name"`
+	Address             string   `json:"address"`
+	Priority            *int     `json:"priority"`
+	Timeout             *int     `json:"timeout"`
+	TCPOnly             *bool    `json:"tcp_only"`
+	TLS                 *bool    `json:"tls"`
+	TLSServer           *string  `json:"tls_server_name"`
+	DoHURL              *string  `json:"doh_url"`
+	DoQ                 *bool    `json:"doq"`
+	HTTPProxyAddress    *string  `json:"http_proxy_address"`
+	HTTPProxyAuth       *string  `json:"http_proxy_auth,omitempty"`
+	HTTP2Enabled        *bool    `json:"http2_enabled"`
+	MaxIdleConnsPerHost *int     `json:"max_idle_conns_per_host"`
+	HealthChk           *bool    `json:"health_check"`
+	HealthInt           *int     `json:"health_interval"`
+	HealthTO            *int     `json:"health_timeout"`
+	MaxFails            *int     `json:"max_fails"`
+	Weight              *int     `json:"weight"`
+	AdaptiveTF          *float64 `json:"adaptive_timeout_factor"`
 }
 
 func (s *Server) handleUpstreamList(w http.ResponseWriter, r *http.Request) {
@@ -48,6 +52,10 @@ func (s *Server) handleUpstreamGet(w http.ResponseWriter, r *http.Request) {
 	upstreams := s.upstream.Upstreams()
 	for _, u := range upstreams {
 		if u.Name == name {
+			http2Enabled := true
+			if u.Config.HTTP2Enabled != nil {
+				http2Enabled = *u.Config.HTTP2Enabled
+			}
 			writeOK(w, map[string]any{
 				"name":                    u.Name,
 				"address":                 u.Config.Address,
@@ -58,6 +66,9 @@ func (s *Server) handleUpstreamGet(w http.ResponseWriter, r *http.Request) {
 				"tls_server_name":         u.Config.TLSServerName,
 				"doh_url":                 u.Config.DoHURL,
 				"doq":                     u.Config.DoQ,
+				"http_proxy_address":      u.Config.HTTPProxyAddress,
+				"http2_enabled":           http2Enabled,
+				"max_idle_conns_per_host": u.Config.MaxIdleConnsPerHost,
 				"health_check":            u.Config.HealthCheck,
 				"health_interval":         u.Config.HealthInterval,
 				"health_timeout":          u.Config.HealthTimeout,
@@ -120,6 +131,18 @@ func (s *Server) handleUpstreamCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if input.DoQ != nil {
 		uc.DoQ = *input.DoQ
+	}
+	if input.HTTPProxyAddress != nil {
+		uc.HTTPProxyAddress = *input.HTTPProxyAddress
+	}
+	if input.HTTPProxyAuth != nil {
+		uc.HTTPProxyAuth = *input.HTTPProxyAuth
+	}
+	if input.HTTP2Enabled != nil {
+		uc.HTTP2Enabled = input.HTTP2Enabled
+	}
+	if input.MaxIdleConnsPerHost != nil {
+		uc.MaxIdleConnsPerHost = *input.MaxIdleConnsPerHost
 	}
 	if input.HealthChk != nil {
 		uc.HealthCheck = *input.HealthChk
@@ -199,6 +222,18 @@ func (s *Server) handleUpstreamUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if input.DoQ != nil {
 		uc.DoQ = *input.DoQ
+	}
+	if input.HTTPProxyAddress != nil {
+		uc.HTTPProxyAddress = *input.HTTPProxyAddress
+	}
+	if input.HTTPProxyAuth != nil {
+		uc.HTTPProxyAuth = *input.HTTPProxyAuth
+	}
+	if input.HTTP2Enabled != nil {
+		uc.HTTP2Enabled = input.HTTP2Enabled
+	}
+	if input.MaxIdleConnsPerHost != nil {
+		uc.MaxIdleConnsPerHost = *input.MaxIdleConnsPerHost
 	}
 	if input.HealthChk != nil {
 		uc.HealthCheck = *input.HealthChk

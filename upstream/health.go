@@ -11,6 +11,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/bata94/northstar/dns"
 	"github.com/bata94/northstar/metrics"
 )
 
@@ -123,6 +124,12 @@ func (hc *HealthChecker) probe() {
 	}
 
 	start := time.Now()
+
+	if u.DoH != nil {
+		hc.probeDoH(probeTO)
+		return
+	}
+
 	var conn net.Conn
 	var err error
 	if u.Config.TLS {
@@ -187,6 +194,50 @@ func (hc *HealthChecker) probe() {
 	if hc.metrics != nil {
 		hc.metrics.UpstreamHealthy.WithLabelValues(u.Name).Set(1)
 		hc.metrics.UpstreamProbeDuration.WithLabelValues(u.Name).Observe(latency.Seconds())
+	}
+}
+
+func (hc *HealthChecker) probeDoH(probeTO time.Duration) {
+	u := hc.upstream
+	start := time.Now()
+
+	ctx, cancel := context.WithTimeout(context.Background(), probeTO)
+	defer cancel()
+
+	msg := buildDoHProbeQuery()
+	_, err := u.DoH.Query(ctx, msg)
+	if err != nil {
+		slog.Debug("Health probe failed (DoH)", "upstream", u.Name, "error", err)
+		u.ReportFailure()
+		if hc.metrics != nil {
+			hc.metrics.UpstreamFails.WithLabelValues(u.Name).Inc()
+		}
+		return
+	}
+
+	latency := time.Since(start)
+	u.RecordLatency(latency)
+
+	if !u.IsHealthy() {
+		slog.Info("Upstream recovered", "upstream", u.Name)
+	}
+	u.ReportSuccess()
+	if hc.metrics != nil {
+		hc.metrics.UpstreamHealthy.WithLabelValues(u.Name).Set(1)
+		hc.metrics.UpstreamProbeDuration.WithLabelValues(u.Name).Observe(latency.Seconds())
+	}
+}
+
+func buildDoHProbeQuery() *dns.Message {
+	return &dns.Message{
+		Header: dns.Header{
+			ID:      uint16(time.Now().UnixNano() & 0xFFFF),
+			Flags:   0x0100, // standard query
+			QDCount: 1,
+		},
+		Questions: []dns.Question{
+			{Name: ".", Type: 1, Class: 1}, // A record for root
+		},
 	}
 }
 

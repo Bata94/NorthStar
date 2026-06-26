@@ -92,6 +92,10 @@ type UpstreamConfig struct {
 	TLSServerName         string  // SNI override for DoT/DoH/DoQ
 	DoHURL                string  // DNS-over-HTTPS URL (e.g., "https://example.com/dns-query")
 	DoQ                   bool    // DNS-over-QUIC
+	HTTPProxyAddress      string  // HTTP CONNECT proxy URL (e.g., "http://proxy.corp:3128")
+	HTTPProxyAuth         string  // Basic auth "user:pass" for proxy (optional)
+	HTTP2Enabled          *bool   // nil = enabled for DoH (default true)
+	MaxIdleConnsPerHost   int     // max idle connections per DoH host (default 10)
 	HealthCheck           bool    // default true
 	HealthInterval        int     // seconds, default 30
 	HealthTimeout         int     // seconds, default 5
@@ -103,6 +107,12 @@ type UpstreamConfig struct {
 type ConditionalRouteConfig struct {
 	Domain   string
 	Upstream string
+}
+
+type ForwardingZoneConfig struct {
+	Domain    string
+	Upstreams []string
+	Mode      string // "forward-only" or "forward-first"
 }
 
 type QMinimizerHookConfig struct {
@@ -253,6 +263,15 @@ type TracingConfig struct {
 	SampleRate  float64 // 0.0-1.0, default 0.1
 }
 
+type DHCPConfig struct {
+	Enabled      bool
+	LeaseFile    string
+	Format       string // "dnsmasq" (default) or "isc"
+	Domain       string // domain suffix for DHCP hostnames
+	TTL          uint32 // default 300
+	PollInterval int    // seconds, default 30
+}
+
 type Config struct {
 	Mode                 string
 	NodeName             string
@@ -306,12 +325,14 @@ type Config struct {
 	Dns64Prefix          string // NAT64 prefix, default "64:ff9b::/96"
 	EcsPrefixV4          int    // source prefix length for IPv4 (default 24)
 	EcsPrefixV6          int    // source prefix length for IPv6 (default 56)
+	ForwardingZones      []ForwardingZoneConfig
 	Zones                []ZoneConfig
 	ACLs                 []ACLConfig
 	EDNSPaddingBlockSize int // EDNS padding block size; 0 = disabled, 128/256 typical
 	ReusePort            bool
 	ReusePortWorkers     int
 	RateLimitFailClose   bool
+	DHCP                 DHCPConfig
 	Tracing              TracingConfig
 	Hooks                HookConfig
 }
@@ -380,6 +401,14 @@ func Load() Config {
 		ReusePort:            true,
 		ReusePortWorkers:     0,
 		RateLimitFailClose:   false,
+		DHCP: DHCPConfig{
+			Enabled:      false,
+			LeaseFile:    "",
+			Format:       "dnsmasq",
+			Domain:       "lan",
+			TTL:          300,
+			PollInterval: 30,
+		},
 		Tracing: TracingConfig{
 			Enable:      false,
 			Endpoint:    "localhost:4317",
@@ -547,6 +576,14 @@ func Reload() (Config, error) {
 		ReusePort:            true,
 		ReusePortWorkers:     0,
 		RateLimitFailClose:   false,
+		DHCP: DHCPConfig{
+			Enabled:      false,
+			LeaseFile:    "",
+			Format:       "dnsmasq",
+			Domain:       "lan",
+			TTL:          300,
+			PollInterval: 30,
+		},
 		Tracing: TracingConfig{
 			Enable:      false,
 			Endpoint:    "localhost:4317",

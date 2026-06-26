@@ -143,6 +143,10 @@ type FileUpstreamConfig struct {
 	TLSServerName         *string  `yaml:"tls_server_name"`
 	DoHURL                *string  `yaml:"doh_url"`
 	DoQ                   *bool    `yaml:"doq"`
+	HTTPProxyAddress      *string  `yaml:"http_proxy_address,omitempty"`
+	HTTPProxyAuth         *string  `yaml:"http_proxy_auth,omitempty"`
+	HTTP2Enabled          *bool    `yaml:"http2_enabled,omitempty"`
+	MaxIdleConnsPerHost   *int     `yaml:"max_idle_conns_per_host,omitempty"`
 	HealthCheck           *bool    `yaml:"health_check"`
 	HealthInterval        *int     `yaml:"health_interval"`
 	HealthTimeout         *int     `yaml:"health_timeout"`
@@ -154,6 +158,12 @@ type FileUpstreamConfig struct {
 type FileConditionalRouteConfig struct {
 	Domain   *string `yaml:"domain"`
 	Upstream *string `yaml:"upstream"`
+}
+
+type FileForwardingZoneConfig struct {
+	Domain    *string  `yaml:"domain"`
+	Upstreams []string `yaml:"upstreams"`
+	Mode      *string  `yaml:"mode,omitempty"`
 }
 
 type FileZoneRecordConfig struct {
@@ -245,6 +255,15 @@ type FileACLConfig struct {
 	Upstream *string `yaml:"upstream,omitempty"`
 }
 
+type FileDHCPConfig struct {
+	Enabled      *bool   `yaml:"enabled"`
+	LeaseFile    *string `yaml:"lease_file"`
+	Format       *string `yaml:"format,omitempty"`
+	Domain       *string `yaml:"domain,omitempty"`
+	TTL          *int    `yaml:"ttl,omitempty"`
+	PollInterval *int    `yaml:"poll_interval,omitempty"`
+}
+
 type FileEDNSConfig struct {
 	PaddingBlockSize *int `yaml:"padding_block_size"`
 }
@@ -257,6 +276,7 @@ type FileConfig struct {
 	UpstreamAddr         *string                      `yaml:"upstream"`
 	Upstreams            []FileUpstreamConfig         `yaml:"upstreams"`
 	ConditionalRoutes    []FileConditionalRouteConfig `yaml:"conditional_routes"`
+	ForwardingZones      []FileForwardingZoneConfig   `yaml:"forwarding_zones,omitempty"`
 	UpstreamConcurrency  *int                         `yaml:"upstream_concurrency"`
 	CacheAddr            *string                      `yaml:"cache_addr"`
 	CacheFile            *string                      `yaml:"cache_file"`
@@ -305,6 +325,7 @@ type FileConfig struct {
 	ReusePortWorkers     *int                         `yaml:"reuse_port_workers"`
 	RateLimitFailClose   *bool                        `yaml:"rate_limit_fail_close"`
 	ACLs                 []FileACLConfig              `yaml:"acls,omitempty"`
+	DHCP                 *FileDHCPConfig              `yaml:"dhcp,omitempty"`
 	Tracing              *FileTracingConfig           `yaml:"tracing"`
 	Hooks                *FileHookConfig              `yaml:"hooks"`
 	EDNS                 *FileEDNSConfig              `yaml:"edns,omitempty"`
@@ -369,6 +390,31 @@ func fileUpstreamToConfig(src *FileUpstreamConfig) UpstreamConfig {
 	if src.AdaptiveTimeoutFactor != nil {
 		dst.AdaptiveTimeoutFactor = *src.AdaptiveTimeoutFactor
 	}
+	if src.HTTPProxyAddress != nil {
+		dst.HTTPProxyAddress = *src.HTTPProxyAddress
+	}
+	if src.HTTPProxyAuth != nil {
+		dst.HTTPProxyAuth = *src.HTTPProxyAuth
+	}
+	if src.HTTP2Enabled != nil {
+		dst.HTTP2Enabled = src.HTTP2Enabled
+	}
+	if src.MaxIdleConnsPerHost != nil {
+		dst.MaxIdleConnsPerHost = *src.MaxIdleConnsPerHost
+	}
+	return dst
+}
+
+func fileForwardingZoneToConfig(src FileForwardingZoneConfig) ForwardingZoneConfig {
+	dst := ForwardingZoneConfig{
+		Upstreams: src.Upstreams,
+	}
+	if src.Domain != nil {
+		dst.Domain = *src.Domain
+	}
+	if src.Mode != nil {
+		dst.Mode = *src.Mode
+	}
 	return dst
 }
 
@@ -403,6 +449,13 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 			if fc.ConditionalRoutes[i].Upstream != nil {
 				cfg.ConditionalRoutes[i].Upstream = *fc.ConditionalRoutes[i].Upstream
 			}
+		}
+	}
+
+	if len(fc.ForwardingZones) > 0 {
+		cfg.ForwardingZones = make([]ForwardingZoneConfig, len(fc.ForwardingZones))
+		for i := range fc.ForwardingZones {
+			cfg.ForwardingZones[i] = fileForwardingZoneToConfig(fc.ForwardingZones[i])
 		}
 	}
 
@@ -511,6 +564,26 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 		}
 		if fc.Tracing.SampleRate != nil {
 			cfg.Tracing.SampleRate = *fc.Tracing.SampleRate
+		}
+	}
+	if fc.DHCP != nil {
+		if fc.DHCP.Enabled != nil {
+			cfg.DHCP.Enabled = *fc.DHCP.Enabled
+		}
+		if fc.DHCP.LeaseFile != nil {
+			cfg.DHCP.LeaseFile = *fc.DHCP.LeaseFile
+		}
+		if fc.DHCP.Format != nil {
+			cfg.DHCP.Format = *fc.DHCP.Format
+		}
+		if fc.DHCP.Domain != nil {
+			cfg.DHCP.Domain = *fc.DHCP.Domain
+		}
+		if fc.DHCP.TTL != nil {
+			cfg.DHCP.TTL = uint32(*fc.DHCP.TTL)
+		}
+		if fc.DHCP.PollInterval != nil {
+			cfg.DHCP.PollInterval = *fc.DHCP.PollInterval
 		}
 	}
 	if fc.MetricsEnable != nil {
@@ -888,6 +961,21 @@ func configToFile(cfg *Config) *FileConfig {
 	dns64Prefix := cfg.Dns64Prefix
 	ecsPrefixV4 := cfg.EcsPrefixV4
 	ecsPrefixV6 := cfg.EcsPrefixV6
+	dhcpEnabled := cfg.DHCP.Enabled
+	dhcpLeaseFile := cfg.DHCP.LeaseFile
+	dhcpFormat := cfg.DHCP.Format
+	if dhcpFormat == "" {
+		dhcpFormat = "dnsmasq"
+	}
+	dhcpDomain := cfg.DHCP.Domain
+	dhcpTTL := int(cfg.DHCP.TTL)
+	if dhcpTTL == 0 {
+		dhcpTTL = 300
+	}
+	dhcpPollInterval := cfg.DHCP.PollInterval
+	if dhcpPollInterval == 0 {
+		dhcpPollInterval = 30
+	}
 	ednsPaddingBlockSize := cfg.EDNSPaddingBlockSize
 	hookEnabled := cfg.Hooks.RateLimiting.Enabled
 	hookPriority := cfg.Hooks.RateLimiting.Priority
@@ -956,25 +1044,49 @@ func configToFile(cfg *Config) *FileConfig {
 		priority := u.Priority
 		timeout := u.Timeout
 		tcpOnly := u.TCPOnly
+		tls := u.TLS
+		tlsServerName := u.TLSServerName
+		dohURL := u.DoHURL
+		doq := u.DoQ
+		httpProxyAddr := u.HTTPProxyAddress
+		httpProxyAuth := u.HTTPProxyAuth
+		maxIdle := u.MaxIdleConnsPerHost
 		healthCheck := u.HealthCheck
 		healthInterval := u.HealthInterval
 		healthTimeout := u.HealthTimeout
 		maxFails := u.MaxFails
 		weight := u.Weight
 		adaptiveFactor := u.AdaptiveTimeoutFactor
-		fileUpstreams = append(fileUpstreams, FileUpstreamConfig{
+		fu := FileUpstreamConfig{
 			Name:                  &name,
 			Address:               &addr,
 			Priority:              &priority,
 			Timeout:               &timeout,
 			TCPOnly:               &tcpOnly,
+			TLS:                   &tls,
+			TLSServerName:         &tlsServerName,
+			DoHURL:                &dohURL,
+			DoQ:                   &doq,
 			HealthCheck:           &healthCheck,
 			HealthInterval:        &healthInterval,
 			HealthTimeout:         &healthTimeout,
 			MaxFails:              &maxFails,
 			Weight:                &weight,
 			AdaptiveTimeoutFactor: &adaptiveFactor,
-		})
+		}
+		if httpProxyAddr != "" {
+			fu.HTTPProxyAddress = &httpProxyAddr
+		}
+		if httpProxyAuth != "" {
+			fu.HTTPProxyAuth = &httpProxyAuth
+		}
+		if u.HTTP2Enabled != nil {
+			fu.HTTP2Enabled = u.HTTP2Enabled
+		}
+		if maxIdle > 0 {
+			fu.MaxIdleConnsPerHost = &maxIdle
+		}
+		fileUpstreams = append(fileUpstreams, fu)
 	}
 
 	var fileRPZ []FileRPZConfig
@@ -1004,6 +1116,22 @@ func configToFile(cfg *Config) *FileConfig {
 		fileRoutes = append(fileRoutes, FileConditionalRouteConfig{
 			Domain:   &domain,
 			Upstream: &upstreamName,
+		})
+	}
+
+	var fileFwdZones []FileForwardingZoneConfig
+	for _, fz := range cfg.ForwardingZones {
+		domain := fz.Domain
+		mode := fz.Mode
+		if mode == "" {
+			mode = "forward-only"
+		}
+		upstreams := make([]string, len(fz.Upstreams))
+		copy(upstreams, fz.Upstreams)
+		fileFwdZones = append(fileFwdZones, FileForwardingZoneConfig{
+			Domain:    &domain,
+			Upstreams: upstreams,
+			Mode:      &mode,
 		})
 	}
 
@@ -1247,6 +1375,15 @@ func configToFile(cfg *Config) *FileConfig {
 				Enabled:  &specialDomainEnabled,
 				Priority: &specialDomainPriority,
 			},
+		},
+		ForwardingZones: fileFwdZones,
+		DHCP: &FileDHCPConfig{
+			Enabled:      &dhcpEnabled,
+			LeaseFile:    &dhcpLeaseFile,
+			Format:       &dhcpFormat,
+			Domain:       &dhcpDomain,
+			TTL:          &dhcpTTL,
+			PollInterval: &dhcpPollInterval,
 		},
 		Zones: fileZones,
 		ACLs:  fileACLs,

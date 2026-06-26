@@ -80,7 +80,7 @@ func TestBlastConcurrent(t *testing.T) {
 
 			domain := domains[idx%len(domains)]
 			qStart := time.Now()
-			entry, _, err := resolve(ctx, domain, 1, g, c, 512, "udp", rc, false, m, nil, "")
+			entry, _, err := resolve(ctx, domain, 1, g, c, 512, "udp", rc, false, m, nil, "", false)
 			dur := time.Since(qStart)
 
 			results <- result{duration: dur, success: err == nil && entry != nil}
@@ -188,7 +188,7 @@ func TestBlastStressCache(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _, err := resolve(ctx, "example.com.", 1, g, c, 512, "udp", rc, false, m, nil, "")
+			_, _, err := resolve(ctx, "example.com.", 1, g, c, 512, "udp", rc, false, m, nil, "", false)
 			if err != nil {
 				errCount.Add(1)
 			}
@@ -239,7 +239,7 @@ func TestBlastInflightDedupStress(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			_, _, err := resolve(ctx, "example.com.", 1, g, c, 512, "udp", rc, false, m, nil, "")
+			_, _, err := resolve(ctx, "example.com.", 1, g, c, 512, "udp", rc, false, m, nil, "", false)
 			if err != nil {
 				errCount.Add(1)
 			}

@@ -416,7 +416,7 @@ func processQuery(ctx context.Context, req *dns.Message, network, clientIP strin
 		return
 	}
 
-	entry, upstreamName, err := resolve(ctx, q.Name, q.Type, group, c, maxPayload, network, runtimeCfg, do, m, hookCtx.ECSData, hookCtx.PreferredUpstream)
+	entry, upstreamName, err := resolve(ctx, q.Name, q.Type, group, c, maxPayload, network, runtimeCfg, do, m, hookCtx.ECSData, hookCtx.PreferredUpstream, hookCtx.ForwardOnly)
 	if err != nil {
 		slog.Error("Upstream error", "domain", q.Name, "type", q.Type, "error", err)
 		m.ErrorsTotal.With(prometheus.Labels{"type": "servfail"}).Inc()
@@ -427,7 +427,7 @@ func processQuery(ctx context.Context, req *dns.Message, network, clientIP strin
 	hookCtx.Entry = entry
 	hookCtx.Upstream = upstreamName
 	hookCtx.ResolveFunc = func(ctx context.Context, domain string, qtype uint16) (*cache.Entry, error) {
-		e, _, err := resolve(ctx, domain, qtype, group, c, maxPayload, network, runtimeCfg, do, m, hookCtx.ECSData, hookCtx.PreferredUpstream)
+		e, _, err := resolve(ctx, domain, qtype, group, c, maxPayload, network, runtimeCfg, do, m, hookCtx.ECSData, hookCtx.PreferredUpstream, hookCtx.ForwardOnly)
 		return e, err
 	}
 
@@ -744,6 +744,9 @@ func fetchFromUpstream(ctx context.Context, domain string, qtype uint16, maxPayl
 		u.RecordLatency(time.Since(start))
 		u.ReportSuccess()
 		m.UpstreamQueries.WithLabelValues(u.Name).Inc()
+		if proto := u.DoH.LastNegotiatedProtocol(); proto != "" && m.UpstreamDoHProtocol != nil {
+			m.UpstreamDoHProtocol.WithLabelValues(u.Name, proto).Inc()
+		}
 		rcode := reply.Header.Flags & 0x000F
 		entry := cache.NewEntry(domain, qtype, rcode, reply.Answers, reply.Authorities, stripOPT(reply.Additionals), ttlMin, ttlMax, negativeTTLMin, negativeTTLCap)
 		entry.Flags = reply.Header.Flags
@@ -883,7 +886,7 @@ func refreshCache(call *inflightCall, ikey inflightKey, domain string, qtype uin
 	inflightMu.Unlock()
 }
 
-func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.Group, c cache.Cache, maxPayload uint16, network string, runtimeCfg *config.RuntimeConfig, do bool, m *metrics.Metrics, ecsData []byte, preferredUpstream string) (*cache.Entry, string, error) {
+func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.Group, c cache.Cache, maxPayload uint16, network string, runtimeCfg *config.RuntimeConfig, do bool, m *metrics.Metrics, ecsData []byte, preferredUpstream string, forwardOnly bool) (*cache.Entry, string, error) {
 	m.CacheLookups.Inc()
 	m.NegativeCacheLookups.Inc()
 	ttlMin := int(runtimeCfg.TTLMin.Load())
@@ -1025,6 +1028,11 @@ func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.G
 		}
 	}
 	if len(selectedUpstreams) == 0 {
+		if forwardOnly {
+			err = fmt.Errorf("forward-only upstream %q is unhealthy", preferredUpstream)
+			call.err = err
+			return nil, "", err
+		}
 		selectedUpstreams = group.SelectN(ctx, domain, group.Concurrency)
 	}
 	if len(selectedUpstreams) == 0 {
@@ -1067,7 +1075,7 @@ func StartCachePrefetch(ctx context.Context, c cache.Cache, m *metrics.Metrics, 
 		return
 	}
 	resolveFn := func(rctx context.Context, domain string, qtype uint16) (*cache.Entry, error) {
-		e, _, err := resolve(rctx, domain, qtype, group, c, 1232, "udp", runtimeCfg, false, m, nil, "")
+		e, _, err := resolve(rctx, domain, qtype, group, c, 1232, "udp", runtimeCfg, false, m, nil, "", false)
 		return e, err
 	}
 	mem.StartPrefetch(ctx, cache.PrefetchConfig{

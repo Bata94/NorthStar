@@ -101,6 +101,19 @@ func (u *Upstream) Close() {
 	if u.TCPPool != nil {
 		u.TCPPool.Close()
 	}
+	if u.DoH != nil && u.DoH.Origin() != "" && http2Enabled(u.Config) {
+		releaseDoHTransport(u.DoH.Origin())
+	}
+	if u.DoH != nil {
+		u.DoH.CloseIdleConnections()
+	}
+}
+
+func http2Enabled(cfg config.UpstreamConfig) bool {
+	if cfg.HTTP2Enabled != nil {
+		return *cfg.HTTP2Enabled
+	}
+	return true // default enabled
 }
 
 func newUpstream(cfg config.UpstreamConfig, poolSize, poolIdle int) *Upstream {
@@ -115,7 +128,18 @@ func newUpstream(cfg config.UpstreamConfig, poolSize, poolIdle int) *Upstream {
 		return u
 	}
 	if cfg.DoHURL != "" {
-		u.DoH = NewDoHClient(cfg.DoHURL, cfg.Timeout)
+		opts := DoHOptions{
+			URL:                 cfg.DoHURL,
+			Timeout:             cfg.Timeout,
+			ProxyAddress:        cfg.HTTPProxyAddress,
+			ProxyAuth:           cfg.HTTPProxyAuth,
+			HTTP2Enabled:        http2Enabled(cfg),
+			MaxIdleConnsPerHost: cfg.MaxIdleConnsPerHost,
+		}
+		if opts.MaxIdleConnsPerHost < 2 {
+			opts.MaxIdleConnsPerHost = 10
+		}
+		u.DoH = NewDoHClient(opts)
 		u.healthy.Store(true)
 		return u
 	}
@@ -199,6 +223,13 @@ func NewGroup(cfg *config.Config, m *metrics.Metrics) (*Group, error) {
 		}
 		if uc.Weight == 0 {
 			uc.Weight = 1
+		}
+		if uc.HTTP2Enabled == nil {
+			enabled := true
+			uc.HTTP2Enabled = &enabled
+		}
+		if uc.MaxIdleConnsPerHost < 2 {
+			uc.MaxIdleConnsPerHost = 10
 		}
 
 		u := newUpstream(uc, cfg.UpstreamPoolSize, cfg.UpstreamPoolIdle)
@@ -369,7 +400,15 @@ func (g *Group) ReloadConfig(cfg *config.Config) error {
 		if existing, ok := g.byName[uc.Name]; ok &&
 			existing.Config.Address == uc.Address &&
 			existing.Config.Timeout == uc.Timeout &&
-			existing.Config.TCPOnly == uc.TCPOnly {
+			existing.Config.TCPOnly == uc.TCPOnly &&
+			existing.Config.TLS == uc.TLS &&
+			existing.Config.TLSServerName == uc.TLSServerName &&
+			existing.Config.DoHURL == uc.DoHURL &&
+			existing.Config.DoQ == uc.DoQ &&
+			existing.Config.HTTPProxyAddress == uc.HTTPProxyAddress &&
+			existing.Config.HTTPProxyAuth == uc.HTTPProxyAuth &&
+			existing.Config.HTTP2Enabled == uc.HTTP2Enabled &&
+			existing.Config.MaxIdleConnsPerHost == uc.MaxIdleConnsPerHost {
 			existing.Config = uc
 			newByName[uc.Name] = existing
 		} else {

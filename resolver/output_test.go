@@ -108,7 +108,7 @@ func TestOutputComparison(t *testing.T) {
 
 					dCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 					defer cancel()
-					entry, _, err := resolve(dCtx, d.domain, d.qtype, g, c, 512, "udp", rc, false, m, nil, "")
+					entry, _, err := resolve(dCtx, d.domain, d.qtype, g, c, 512, "udp", rc, false, m, nil, "", false)
 					if err != nil {
 						t.Errorf("Northstar resolve error: %v", err)
 						return
@@ -197,7 +197,7 @@ func TestOutputComparisonMocked(t *testing.T) {
 	rc := testutil.NewRuntimeConfig()
 	ctx := context.Background()
 
-	entry, _, err := resolve(ctx, "example.com.", 1, g, c, 512, "udp", rc, false, m, nil, "")
+	entry, _, err := resolve(ctx, "example.com.", 1, g, c, 512, "udp", rc, false, m, nil, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}

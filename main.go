@@ -17,6 +17,7 @@ import (
 	"github.com/bata94/northstar/api"
 	"github.com/bata94/northstar/cache"
 	"github.com/bata94/northstar/config"
+	"github.com/bata94/northstar/dhcp"
 	"github.com/bata94/northstar/filter"
 	"github.com/bata94/northstar/hooks"
 	"github.com/bata94/northstar/log"
@@ -173,8 +174,20 @@ func main() {
 	defer cancel()
 
 	clientStats := filter.NewClientStatsCollector(1000)
-	blockingHook, _ := buildHooksWithBlocking(ctx, &cfg, backend, m, authHook, aclHook, clientStats)
-	resolver.SetPipeline(buildPipeline(ctx, &cfg, backend, m, authHook, aclHook, tracer.Tracer(), clientStats))
+
+	var dhcpWatcher *dhcp.Watcher
+	if cfg.DHCP.Enabled && cfg.DHCP.LeaseFile != "" {
+		dhcpWatcher = dhcp.NewWatcher(cfg.DHCP.LeaseFile, cfg.DHCP.Format, time.Duration(cfg.DHCP.PollInterval)*time.Second)
+		if err := dhcpWatcher.Start(ctx.Done()); err != nil {
+			slog.Warn("DHCP lease file watcher failed to start", "error", err, "path", cfg.DHCP.LeaseFile)
+			dhcpWatcher = nil
+		} else {
+			slog.Info("DHCP lease file watcher started", "path", cfg.DHCP.LeaseFile, "format", cfg.DHCP.Format)
+		}
+	}
+
+	blockingHook, _ := buildHooksWithBlocking(ctx, &cfg, backend, m, authHook, aclHook, clientStats, dhcpWatcher)
+	resolver.SetPipeline(buildPipeline(ctx, &cfg, backend, m, authHook, aclHook, tracer.Tracer(), clientStats, dhcpWatcher))
 
 	runtimeCfg := config.NewRuntimeConfig(&cfg)
 
@@ -188,7 +201,7 @@ func main() {
 	go func() {
 		for range sighupCh {
 			slog.Warn("SIGHUP received, reloading config...")
-			reloadConfig(runtimeCfg, upstreamGroup, backend, m, authHook, aclHook, tracer, clientStats)
+			reloadConfig(runtimeCfg, upstreamGroup, backend, m, authHook, aclHook, tracer, clientStats, dhcpWatcher)
 		}
 	}()
 
@@ -301,19 +314,19 @@ func main() {
 	slog.Warn("Goodbye.")
 }
 
-func buildPipeline(ctx context.Context, cfg *config.Config, c cache.Cache, m *metrics.Metrics, authHook *hooks.AuthoritativeHook, aclHook *hooks.AclHook, tr trace.Tracer, clientStats *filter.ClientStatsCollector) *hooks.Pipeline {
+func buildPipeline(ctx context.Context, cfg *config.Config, c cache.Cache, m *metrics.Metrics, authHook *hooks.AuthoritativeHook, aclHook *hooks.AclHook, tr trace.Tracer, clientStats *filter.ClientStatsCollector, dhcpWatcher *dhcp.Watcher) *hooks.Pipeline {
 	p := hooks.NewPipeline()
 	if tr != nil {
 		p.SetTracer(tr)
 	}
-	_, hks := buildHooksWithBlocking(ctx, cfg, c, m, authHook, aclHook, clientStats)
+	_, hks := buildHooksWithBlocking(ctx, cfg, c, m, authHook, aclHook, clientStats, dhcpWatcher)
 	for _, h := range hks {
 		p.Register(h)
 	}
 	return p
 }
 
-func reloadConfig(runtimeCfg *config.RuntimeConfig, upstreamGroup *upstream.Group, c cache.Cache, m *metrics.Metrics, authHook *hooks.AuthoritativeHook, aclHook *hooks.AclHook, tracer *tracing.Tracing, clientStats *filter.ClientStatsCollector) {
+func reloadConfig(runtimeCfg *config.RuntimeConfig, upstreamGroup *upstream.Group, c cache.Cache, m *metrics.Metrics, authHook *hooks.AuthoritativeHook, aclHook *hooks.AclHook, tracer *tracing.Tracing, clientStats *filter.ClientStatsCollector, dhcpWatcher *dhcp.Watcher) {
 	newCfg, err := config.Reload()
 	if err != nil {
 		slog.Error("Config reload failed", "error", err)
@@ -350,11 +363,11 @@ func reloadConfig(runtimeCfg *config.RuntimeConfig, upstreamGroup *upstream.Grou
 		}
 		slog.SetDefault(log.New(newLogLevel, newLogMode, newCfg.LogDir, newCfg.LogRetention))
 	}
-	resolver.SetPipeline(buildPipeline(context.Background(), &newCfg, c, m, authHook, aclHook, tracer.Tracer(), clientStats))
+	resolver.SetPipeline(buildPipeline(context.Background(), &newCfg, c, m, authHook, aclHook, tracer.Tracer(), clientStats, dhcpWatcher))
 	slog.Warn("Config reloaded")
 }
 
-func buildHooksWithBlocking(ctx context.Context, cfg *config.Config, c cache.Cache, m *metrics.Metrics, authHook *hooks.AuthoritativeHook, aclHook *hooks.AclHook, clientStats *filter.ClientStatsCollector) (*hooks.BlockingHook, []hooks.Hook) {
+func buildHooksWithBlocking(ctx context.Context, cfg *config.Config, c cache.Cache, m *metrics.Metrics, authHook *hooks.AuthoritativeHook, aclHook *hooks.AclHook, clientStats *filter.ClientStatsCollector, dhcpWatcher *dhcp.Watcher) (*hooks.BlockingHook, []hooks.Hook) {
 	var result []hooks.Hook
 	var blockHook *hooks.BlockingHook
 
@@ -363,6 +376,19 @@ func buildHooksWithBlocking(ctx context.Context, cfg *config.Config, c cache.Cac
 	}
 	if aclHook != nil && aclHook.Enabled() {
 		result = append(result, aclHook)
+	}
+
+	if len(cfg.ForwardingZones) > 0 {
+		result = append(result, hooks.NewForwardingZoneHook(cfg.ForwardingZones))
+		slog.Info("Forwarding zones enabled", "count", len(cfg.ForwardingZones))
+	}
+
+	if dhcpWatcher != nil {
+		dhcpHook := hooks.NewDHCPHook(dhcpWatcher, cfg.DHCP.Domain, cfg.DHCP.TTL)
+		if dhcpHook.Enabled() {
+			result = append(result, dhcpHook)
+			slog.Info("DHCP hook enabled", "domain", cfg.DHCP.Domain, "lease_file", cfg.DHCP.LeaseFile)
+		}
 	}
 
 	specialCfg := cfg.Hooks.SpecialDomain

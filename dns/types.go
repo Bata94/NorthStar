@@ -8,6 +8,7 @@ const (
 	TypeNS         = 2
 	TypeCNAME      = 5
 	TypeSOA        = 6
+	TypePTR        = 12
 	TypeMX         = 15
 	TypeTXT        = 16
 	TypeAAAA       = 28
@@ -22,5 +23,6 @@ const (
 	TypeSRV        = 33
 	TypeAXFR       = 252
 	TypeIXFR       = 251
+	TypeTSIG       = 250
 	TypeANY        = 255
 )

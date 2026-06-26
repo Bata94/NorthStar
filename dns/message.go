@@ -229,6 +229,25 @@ func (m *Message) Parse(data []byte) error {
 	return nil
 }
 
+func ParseSOASerial(rr *ResourceRecord) (uint32, error) {
+	if rr.Type != TypeSOA {
+		return 0, errors.New("dns: not an SOA record")
+	}
+	data := rr.RData
+	_, off, err := readName(data, 0, map[int]bool{})
+	if err != nil {
+		return 0, err
+	}
+	_, off, err = readName(data, off, map[int]bool{})
+	if err != nil {
+		return 0, err
+	}
+	if off+4 > len(data) {
+		return 0, errors.New("dns: truncated SOA RData")
+	}
+	return binary.BigEndian.Uint32(data[off : off+4]), nil
+}
+
 func (m *Message) Pack() []byte {
 	buf := make([]byte, 0, 512)
 

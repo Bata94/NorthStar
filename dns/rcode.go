@@ -9,3 +9,5 @@ const (
 	RcodeRefused  = 5
 	RcodeBADVERS  = 16
 )
+
+const ClassIN = 1

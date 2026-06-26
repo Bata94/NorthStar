@@ -29,7 +29,7 @@ func BenchmarkResolveCacheMiss(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_, _, err := resolve(ctx, "example.com.", 1, g, c, 512, "udp", rc, false, m, nil, "")
+			_, _, err := resolve(ctx, "example.com.", 1, g, c, 512, "udp", rc, false, m, nil, "", false)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -62,7 +62,7 @@ func BenchmarkResolveCacheHit(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_, _, err := resolve(ctx, "example.com.", 1, g, c, 512, "udp", rc, false, m, nil, "")
+			_, _, err := resolve(ctx, "example.com.", 1, g, c, 512, "udp", rc, false, m, nil, "", false)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -89,7 +89,7 @@ func BenchmarkResolveNXDOMAIN(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_, _, err := resolve(ctx, "nonexistent.example.com.", 1, g, c, 512, "udp", rc, false, m, nil, "")
+			_, _, err := resolve(ctx, "nonexistent.example.com.", 1, g, c, 512, "udp", rc, false, m, nil, "", false)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -144,7 +144,7 @@ func BenchmarkResolveConcurrent(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_, _, err := resolve(ctx, "example.com.", 1, g, c, 512, "udp", rc, false, m, nil, "")
+			_, _, err := resolve(ctx, "example.com.", 1, g, c, 512, "udp", rc, false, m, nil, "", false)
 			if err != nil {
 				b.Fatal(err)
 			}

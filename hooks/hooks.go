@@ -44,6 +44,7 @@ type Context struct {
 	Upstream          string
 	ECSData           []byte
 	PreferredUpstream string
+	ForwardOnly       bool
 	ResolveFunc       func(ctx context.Context, domain string, qtype uint16) (*cache.Entry, error)
 	StartTime         time.Time
 }

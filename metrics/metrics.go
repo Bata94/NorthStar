@@ -27,6 +27,7 @@ type Metrics struct {
 	UpstreamProbeDuration   *prometheus.HistogramVec
 	UpstreamQueries         *prometheus.CounterVec
 	UpstreamConditionalHits *prometheus.CounterVec
+	UpstreamDoHProtocol     *prometheus.CounterVec
 	BlockedTotal            *prometheus.CounterVec
 	BlockedBySourceTotal    *prometheus.CounterVec
 	AllowlistHitsTotal      prometheus.Counter
@@ -170,6 +171,14 @@ func New() *Metrics {
 		Help:      "Conditional route matches per upstream.",
 	}, []string{"name", "pattern"})
 	reg.MustRegister(m.UpstreamConditionalHits)
+
+	m.UpstreamDoHProtocol = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "northstar",
+		Subsystem: "upstream",
+		Name:      "doh_protocol_total",
+		Help:      "DoH queries by negotiated HTTP protocol version (h2, http/1.1, etc.).",
+	}, []string{"name", "protocol"})
+	reg.MustRegister(m.UpstreamDoHProtocol)
 
 	m.BlockedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: "northstar",

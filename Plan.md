@@ -45,9 +45,9 @@
   (e.g., `*.internal.corp` → private resolver)
 - [X] Adaptive timeouts per upstream — track historical latency and
   adjust timeouts dynamically per upstream
-- [ ] HTTP CONNECT proxy support for DoH upstream — tunnel through
+- [X] HTTP CONNECT proxy support for DoH upstream — tunnel through
   an HTTP CONNECT proxy for outbound DoH queries
-- [ ] HTTP/2 connection coalescing for DoH upstream — reuse a single
+- [X] HTTP/2 connection coalescing for DoH upstream — reuse a single
   HTTP/2 connection for multiple concurrent queries to the same upstream
 
 ## Blocking & Filtering
@@ -148,11 +148,11 @@
   limiting; prevents TCP resource exhaustion
 - [X] Configurable action for rate-limited queries — SERVFAIL vs
   silent drop
-- [ ] Zone transfers (AXFR/IXFR) — support outbound zone transfers
+- [X] Zone transfers (AXFR/IXFR) — support outbound zone transfers
   for secondary DNS replication
-- [ ] DNS forwarding zones — delegate resolution for entire zones
+- [X] DNS forwarding zones — delegate resolution for entire zones
   to specific upstreams (e.g., `corp.example.com` → internal resolver)
-- [ ] DHCP integration — provide hostname resolution for LAN clients
+- [X] DHCP integration — provide hostname resolution for LAN clients
   via DHCP lease information
 - [ ] Response Rate Limiting (RRL) — limit identical responses to
   the same client to prevent amplification attacks (separate from
@@ -544,10 +544,10 @@ Phase 10 (multi-node deployment to benefit from tracing)
 
 **Goal:** Better upstream connectivity options and efficiency.
 
-- [ ] HTTP CONNECT proxy support for DoH upstream — tunnel outbound
+- [X] HTTP CONNECT proxy support for DoH upstream — tunnel outbound
   DoH queries through an HTTP CONNECT proxy for environments with
   egress proxy requirements
-- [ ] HTTP/2 connection coalescing for DoH upstream — reuse a single
+- [X] HTTP/2 connection coalescing for DoH upstream — reuse a single
   HTTP/2 connection for multiple concurrent queries to the same
   DoH upstream (reduces connection overhead)
 
@@ -559,13 +559,13 @@ Phase 10 (multi-node deployment to benefit from tracing)
 
 **Goal:** Full authoritative DNS functionality and advanced routing.
 
-- [ ] Zone transfers (AXFR/IXFR) — support outbound zone transfers
+- [X] Zone transfers (AXFR/IXFR) — support outbound zone transfers
   for secondary DNS replication (TSIG-signed transfer requests)
-- [ ] DNS forwarding zones — delegate resolution for entire zones
+- [X] DNS forwarding zones — delegate resolution for entire zones
   to specific upstreams (e.g., `corp.example.com` → internal
   resolver), with configurable forward-only vs forward-first
   semantics
-- [ ] DHCP integration — consume DHCP lease information to provide
+- [X] DHCP integration — consume DHCP lease information to provide
   hostname resolution for LAN clients without requiring static
   zone configuration
 

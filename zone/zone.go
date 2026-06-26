@@ -431,6 +431,7 @@ type Zone struct {
 	ZSKKey     crypto.Signer
 	Views      []*ZoneView
 	Rollover   *ZoneRollover
+	History    *ZoneHistory
 
 	byName map[string][]Record
 }
