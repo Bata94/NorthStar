@@ -138,6 +138,31 @@ Default prod level is `warn`.
 - **`Info`** — notable operational events visible only when `logLevel=info`: stale-while-revalidate behavior, response truncation, cache backend choice, query log rotation, speed assessment results.
 - **`Debug`** — high-frequency per-query tracing: cache hit/miss, query completion, inflight dedup waits. Only visible in dev mode.
 
+### Error Handling Conventions
+
+- **Never silently discard errors.** Every returned error must be handled:
+  - Return it to the caller if the caller can meaningfully react.
+  - Log it with `slog.Error` (service degradation) or `slog.Warn` (notable anomalies)
+    if the operation can degrade gracefully.
+  - Only use `slog.Debug` for high-frequency per-query errors (e.g., prefetch failures).
+- **Cleanup in error paths**: when a resource must be cleaned up after a failure
+  (e.g., close a temp file, remove a temp file), log the cleanup error but never
+  mask the original error:
+  ```go
+  if cerr := f.Close(); cerr != nil {
+      slog.Error("failed to close temp file", "error", cerr)
+  }
+  return originalErr
+  ```
+- **Deferred Close**: always check and log the error from deferred Close calls:
+  ```go
+  defer func() {
+      if err := f.Close(); err != nil {
+          slog.Error("failed to close file", "path", path, "error", err)
+      }
+  }()
+  ```
+
 ### `hooks`
 - `Lifecycle` enum: `PreResolve`, `PostResolve`, `PreResponse`, `PostResponse`
 - `Context` struct carrying request state (`Request`, `Response`, `Entry`, `ClientIP`, `Network`, `Cache`, `Metrics`, `Send`, `Ctx`, `PreferredUpstream`, `ECSData`, `Logger`)

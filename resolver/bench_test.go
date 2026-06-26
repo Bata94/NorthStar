@@ -56,7 +56,7 @@ func BenchmarkResolveCacheHit(b *testing.B) {
 	entry := cache.NewEntry("example.com.", 1, 0, []dns.ResourceRecord{{
 		Name: "example.com.", Type: 1, Class: 1, TTL: 300,
 		RDLength: 4, RData: net.ParseIP("1.2.3.4").To4(),
-	}}, nil, nil, 0, 0, 0)
+	}}, nil, nil, 0, 0, 0, 0)
 	_ = c.Set(ctx, entry)
 
 	b.ResetTimer()

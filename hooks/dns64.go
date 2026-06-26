@@ -76,6 +76,16 @@ func (h *Dns64Hook) Handle(ctx *Context) error {
 	prefixBits := prefix.Bits()
 
 	aRecords := h.lookupARecords(ctx, q.Name)
+	if len(aRecords) == 0 && ctx.ResolveFunc != nil {
+		resolved, err := ctx.ResolveFunc(ctx.Ctx, q.Name, dns.TypeA)
+		if err == nil && resolved != nil {
+			aRecords = h.filterARecords(resolved.Answers)
+			if len(aRecords) > 0 {
+				slog.Debug("DNS64: triggered A record lookup for synthesis",
+					"domain", q.Name, "count", len(aRecords))
+			}
+		}
+	}
 	if len(aRecords) == 0 {
 		return nil
 	}
@@ -145,8 +155,12 @@ func (h *Dns64Hook) lookupARecords(ctx *Context, domain string) []dns.ResourceRe
 		return nil
 	}
 
+	return h.filterARecords(entry.Answers)
+}
+
+func (h *Dns64Hook) filterARecords(answers []dns.ResourceRecord) []dns.ResourceRecord {
 	var aRecords []dns.ResourceRecord
-	for _, rr := range entry.Answers {
+	for _, rr := range answers {
 		if rr.Type == dns.TypeA && len(rr.RData) == 4 {
 			aRecords = append(aRecords, rr)
 		}

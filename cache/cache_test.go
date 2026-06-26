@@ -51,7 +51,7 @@ func TestNewEntryTTLFromMatchingType(t *testing.T) {
 		[]dns.ResourceRecord{
 			makeA("example.com", 300, "1.2.3.4"),
 			makeA("example.com", 600, "5.6.7.8"),
-		}, nil, nil, 0, 0, 0)
+		}, nil, nil, 0, 0, 0, 0)
 	remaining := time.Until(entry.ExpiresAt)
 	if remaining < 299*time.Second || remaining > 301*time.Second {
 		t.Errorf("expected TTL ~300s (min of A records), got %v", remaining)
@@ -59,7 +59,7 @@ func TestNewEntryTTLFromMatchingType(t *testing.T) {
 }
 
 func TestNewEntryDefaultTTLFallback(t *testing.T) {
-	entry := NewEntry("example.com", 1, 0, nil, nil, nil, 0, 0, 0)
+	entry := NewEntry("example.com", 1, 0, nil, nil, nil, 0, 0, 0, 0)
 	remaining := time.Until(entry.ExpiresAt)
 	if remaining < 299*time.Second || remaining > 301*time.Second {
 		t.Errorf("expected TTL ~300s (negative TTL default), got %v", remaining)
@@ -69,7 +69,7 @@ func TestNewEntryDefaultTTLFallback(t *testing.T) {
 func TestNewEntryEmptyAnswersSoaFallback(t *testing.T) {
 	soa := makeSOA(120)
 	entry := NewEntry("example.com", 1, 0, nil,
-		[]dns.ResourceRecord{soa}, nil, 0, 0, 0)
+		[]dns.ResourceRecord{soa}, nil, 0, 0, 0, 0)
 	remaining := time.Until(entry.ExpiresAt)
 	if remaining < 119*time.Second || remaining > 121*time.Second {
 		t.Errorf("expected TTL ~120s (from SOA), got %v", remaining)
@@ -81,7 +81,7 @@ func TestNewEntryMixedTTLCNAMEAndA(t *testing.T) {
 		[]dns.ResourceRecord{
 			makeCNAME("www.example.com", "example.com", 1200),
 			makeA("example.com", 300, "1.2.3.4"),
-		}, nil, nil, 0, 0, 0)
+		}, nil, nil, 0, 0, 0, 0)
 	remaining := time.Until(entry.ExpiresAt)
 	if remaining < 299*time.Second || remaining > 301*time.Second {
 		t.Errorf("expected TTL ~300s (from A record matching qtype=1), got %v", remaining)
@@ -92,7 +92,7 @@ func TestNewEntryNoMatchingType(t *testing.T) {
 	entry := NewEntry("example.com", 1, 0,
 		[]dns.ResourceRecord{
 			{Name: "example.com", Type: 5, Class: 1, TTL: 100},
-		}, nil, nil, 0, 0, 0)
+		}, nil, nil, 0, 0, 0, 0)
 	remaining := time.Until(entry.ExpiresAt)
 	if remaining < 3599*time.Second || remaining > 3601*time.Second {
 		t.Errorf("expected TTL ~3600s (defaultTTL, no matching type), got %v", remaining)
@@ -103,7 +103,7 @@ func TestNewEntryZeroTTL(t *testing.T) {
 	entry := NewEntry("example.com", 1, 0,
 		[]dns.ResourceRecord{
 			makeA("example.com", 0, "1.2.3.4"),
-		}, nil, nil, 0, 0, 0)
+		}, nil, nil, 0, 0, 0, 0)
 	remaining := time.Until(entry.ExpiresAt)
 	if remaining < 3599*time.Second || remaining > 3601*time.Second {
 		t.Errorf("expected TTL ~3600s (defaultTTL for zero TTL), got %v", remaining)
@@ -165,7 +165,7 @@ func TestMemoryGetSet(t *testing.T) {
 
 	ctx := context.Background()
 	e := NewEntry("example.com", 1, 0,
-		[]dns.ResourceRecord{makeA("example.com", 300, "1.2.3.4")}, nil, nil, 0, 0, 0)
+		[]dns.ResourceRecord{makeA("example.com", 300, "1.2.3.4")}, nil, nil, 0, 0, 0, 0)
 	_ = m.Set(ctx, e)
 
 	got, ok := m.Get(ctx, "example.com", 1)
@@ -195,7 +195,7 @@ func TestMemoryPeek(t *testing.T) {
 
 	ctx := context.Background()
 	e := NewEntry("example.com", 1, 0,
-		[]dns.ResourceRecord{makeA("example.com", 300, "1.2.3.4")}, nil, nil, 0, 0, 0)
+		[]dns.ResourceRecord{makeA("example.com", 300, "1.2.3.4")}, nil, nil, 0, 0, 0, 0)
 	_ = m.Set(ctx, e)
 
 	got, ok := m.Peek(ctx, "example.com", 1)
@@ -298,7 +298,7 @@ func TestMemoryConcurrentAccess(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			domain := "test.example"
-			e := NewEntry(domain, 1, 0, []dns.ResourceRecord{makeA(domain, 300, "1.2.3.4")}, nil, nil, 0, 0, 0)
+			e := NewEntry(domain, 1, 0, []dns.ResourceRecord{makeA(domain, 300, "1.2.3.4")}, nil, nil, 0, 0, 0, 0)
 			_ = m.Set(ctx, e)
 			m.Get(ctx, domain, 1)
 			_, _ = m.Incr(ctx, "concurrent:key", time.Minute)
@@ -331,7 +331,7 @@ func TestNegativeCacheEntryNXDOMAIN(t *testing.T) {
 		TTL: 3600, RDLength: uint16(len(rdata)), RData: rdata,
 	}}
 
-	e := NewEntry("example.com.", 1, dns.RcodeNXDOMAIN, nil, auth, nil, 0, 0, 0)
+	e := NewEntry("example.com.", 1, dns.RcodeNXDOMAIN, nil, auth, nil, 0, 0, 0, 0)
 	if e.RCode != dns.RcodeNXDOMAIN {
 		t.Errorf("expected RCODE %d, got %d", dns.RcodeNXDOMAIN, e.RCode)
 	}
@@ -349,7 +349,7 @@ func TestNegativeCacheEntryNODATA(t *testing.T) {
 		TTL: 3600, RDLength: uint16(len(rdata)), RData: rdata,
 	}}
 
-	e := NewEntry("example.com.", 1, dns.RcodeSuccess, nil, auth, nil, 0, 0, 0)
+	e := NewEntry("example.com.", 1, dns.RcodeSuccess, nil, auth, nil, 0, 0, 0, 0)
 	if e.RCode != dns.RcodeSuccess {
 		t.Errorf("expected RCODE 0, got %d", e.RCode)
 	}
@@ -361,7 +361,7 @@ func TestNegativeCacheEntryNODATA(t *testing.T) {
 }
 
 func TestNegativeCacheEntryConfigurableOverride(t *testing.T) {
-	e := NewEntry("example.com.", 1, dns.RcodeNXDOMAIN, nil, nil, nil, 0, 0, 60)
+	e := NewEntry("example.com.", 1, dns.RcodeNXDOMAIN, nil, nil, nil, 0, 0, 0, 60)
 	expectedTTL := time.Duration(60) * time.Second
 	remaining := time.Until(e.ExpiresAt)
 	if remaining < expectedTTL-time.Second || remaining > expectedTTL+time.Second {

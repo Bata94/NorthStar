@@ -201,7 +201,7 @@ func TestResolveCacheHit(t *testing.T) {
 			Name: "example.com.", Type: 1, Class: 1, TTL: 300,
 			RDLength: uint16(len(ip)),
 			RData:    ip,
-		}}, nil, nil, 0, 0, 0)
+		}}, nil, nil, 0, 0, 0, 0)
 	_ = c.Set(context.Background(), cachedEntry)
 
 	result, upstreamName, err := resolve(context.Background(), "example.com.", 1, g, c, 512, "udp", rc, false, m, nil, "")
@@ -320,7 +320,7 @@ func TestResolveStaleWhileRevalidate(t *testing.T) {
 			Name: "example.com.", Type: 1, Class: 1, TTL: 1,
 			RDLength: uint16(len(ip5)),
 			RData:    ip5,
-		}}, nil, nil, 0, 0, 0)
+		}}, nil, nil, 0, 0, 0, 0)
 	staleEntry.ExpiresAt = time.Now().Add(-1 * time.Second)
 	_ = c.Set(context.Background(), staleEntry)
 

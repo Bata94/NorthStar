@@ -17,7 +17,7 @@
   patterns for smarter eviction
 - [X] Limit cache size by entry count — evict oldest + least-used entries
   when capacity is reached
-- [ ] Keep top entries warm / Adaptive prefetch — proactively refresh
+- [X] Keep top entries warm / Adaptive prefetch — proactively refresh
   popular entries before they expire (configurable popularity threshold
   and prefetch window)
 - [X] TTL Overwrite — global min/max TTL override to reduce upstream
@@ -26,9 +26,9 @@
   with separate (typically shorter) TTLs
 - [X] Cache warming on startup — reload popular entries from Valkey or
   bbolt on restart to avoid a cold-cache storm
-- [ ] Cache persistence to disk on shutdown — save in-memory cache
-  entries to a bbolt file on graceful shutdown for warm restart
-- [ ] Aggressive negative TTL override — configurable floor/cap for
+- [X] Cache persistence to disk on shutdown — save in-memory cache
+  entries to a file on graceful shutdown for warm restart
+- [X] Aggressive negative TTL override — configurable floor/cap for
   negative TTL that overrides SOA minimum field
 
 ## Upstream Management
@@ -123,7 +123,7 @@
   authenticated denial of existence in authoritative zones
 - [ ] DNSSEC key rollover (KSK/ZSK) — automated key rotation with
   overlap period for zero-downtime signing
-- [ ] DNS64 trigger A record lookup — when only a AAAA query arrives,
+- [X] DNS64 trigger A record lookup — when only a AAAA query arrives,
   proactively resolve the A record to enable synthesis
 
 ## Networking & Access Control
@@ -469,16 +469,16 @@ Phase 10 (multi-node deployment to benefit from tracing)
 
 **Goal:** Smarter caching with adaptive prefetch, persistence, and performance tuning.
 
-- [ ] Adaptive prefetch / Keep warm — proactively refresh popular entries
+- [X] Adaptive prefetch / Keep warm — proactively refresh popular entries
   before they expire (configurable popularity threshold and prefetch window)
-- [ ] Cache persistence to disk on shutdown — save in-memory cache entries
-  to a bbolt file on `SIGTERM`/`SIGINT` for warm restart
-- [ ] Aggressive negative TTL override — configurable floor/cap for
+- [X] Cache persistence to disk on shutdown — save in-memory cache entries
+  to a file on `SIGTERM`/`SIGINT` for warm restart
+- [X] Aggressive negative TTL override — configurable floor/cap for
   negative TTL that overrides the SOA minimum field
-- [ ] DNS64 trigger A record lookup — when only a AAAA query arrives
+- [X] DNS64 trigger A record lookup — when only a AAAA query arrives
   and DNS64 is active, proactively resolve the A record first to
   enable synthesis
-- [ ] Parallel zone parsing — parse authoritative zone files concurrently
+- [X] Parallel zone parsing — parse authoritative zone files concurrently
   at startup to reduce cold-start latency
 
 **Depends on:** Phase 2 (cache system), Phase 6 (DNS64)

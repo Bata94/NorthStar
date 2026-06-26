@@ -15,6 +15,7 @@ type Metrics struct {
 	CacheLookups            prometheus.Counter
 	CacheHits               prometheus.Counter
 	CacheEvictionsTotal     *prometheus.CounterVec
+	PrefetchesTotal         prometheus.Counter
 	NegativeCacheLookups    prometheus.Counter
 	NegativeCacheHits       prometheus.Counter
 	UpstreamLatency         *prometheus.HistogramVec
@@ -68,6 +69,14 @@ func New() *Metrics {
 		Help:      "Total cache evictions by backend type.",
 	}, []string{"backend"})
 	reg.MustRegister(m.CacheEvictionsTotal)
+
+	m.PrefetchesTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "northstar",
+		Subsystem: "cache",
+		Name:      "prefetches_total",
+		Help:      "Total cache entries proactively refreshed before expiry.",
+	})
+	reg.MustRegister(m.PrefetchesTotal)
 
 	m.NegativeCacheLookups = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: "northstar",

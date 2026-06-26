@@ -7,6 +7,9 @@ import (
 	"container/list"
 	"context"
 	"encoding/binary"
+	"encoding/json"
+	"log/slog"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -68,26 +71,39 @@ type Cache interface {
 	Close()
 }
 
-func negativeTTLFromSOA(authorities []dns.ResourceRecord, negativeTTL int) uint32 {
-	if negativeTTL > 0 {
-		return uint32(negativeTTL)
+func negativeTTLFromSOA(authorities []dns.ResourceRecord, negativeTTLMin, negativeTTLCap int) uint32 {
+	var ttl uint32
+	found := false
+	if negativeTTLCap > 0 {
+		ttl = uint32(negativeTTLCap)
+		found = true
 	}
-	for _, rr := range authorities {
-		if rr.Type == dns.TypeSOA && len(rr.RData) >= 20 {
-			min := binary.BigEndian.Uint32(rr.RData[len(rr.RData)-4:])
-			if min > 0 {
-				return min
+	if !found {
+		for _, rr := range authorities {
+			if rr.Type == dns.TypeSOA && len(rr.RData) >= 20 {
+				min := binary.BigEndian.Uint32(rr.RData[len(rr.RData)-4:])
+				if min > 0 {
+					ttl = min
+					found = true
+					break
+				}
 			}
 		}
 	}
-	return 300
+	if !found {
+		ttl = 300
+	}
+	if negativeTTLMin > 0 && ttl < uint32(negativeTTLMin) {
+		ttl = uint32(negativeTTLMin)
+	}
+	return ttl
 }
 
-func NewEntry(domain string, qtype uint16, rcode uint16, answers, authorities, additionals []dns.ResourceRecord, ttlMin, ttlMax, negativeTTL int) *Entry {
+func NewEntry(domain string, qtype uint16, rcode uint16, answers, authorities, additionals []dns.ResourceRecord, ttlMin, ttlMax, negativeTTLMin, negativeTTLCap int) *Entry {
 	ttl := uint32(defaultTTL)
 	isNegative := rcode == 3 || (rcode == 0 && len(answers) == 0)
 	if isNegative {
-		ttl = negativeTTLFromSOA(authorities, negativeTTL)
+		ttl = negativeTTLFromSOA(authorities, negativeTTLMin, negativeTTLCap)
 	} else if len(answers) > 0 {
 		matched := false
 		for _, rr := range answers {
@@ -166,6 +182,13 @@ type counterEntry struct {
 	expiresAt time.Time
 }
 
+type PrefetchConfig struct {
+	Enable    bool
+	Threshold int64
+	Window    time.Duration
+	Interval  time.Duration
+}
+
 type Memory struct {
 	entries    map[cacheKey]*list.Element
 	lruList    *list.List
@@ -177,6 +200,7 @@ type Memory struct {
 	locksMu    sync.Mutex
 	stopCh     chan struct{}
 	evictions  atomic.Int64
+	prefetchWg sync.WaitGroup
 	metrics    *metrics.Metrics
 }
 
@@ -376,6 +400,174 @@ func (m *Memory) Incr(_ context.Context, key string, ttl time.Duration) (int64, 
 	return ce.value, nil
 }
 
+func (m *Memory) StartPrefetch(ctx context.Context, cfg PrefetchConfig, resolveFn func(context.Context, string, uint16) (*Entry, error)) {
+	if !cfg.Enable || cfg.Threshold <= 0 || cfg.Window <= 0 || cfg.Interval <= 0 {
+		return
+	}
+	m.prefetchWg.Add(1)
+	go func() {
+		defer m.prefetchWg.Done()
+		ticker := time.NewTicker(cfg.Interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				m.prefetchScan(ctx, cfg, resolveFn)
+			case <-ctx.Done():
+				return
+			case <-m.stopCh:
+				return
+			}
+		}
+	}()
+}
+
+func (m *Memory) prefetchScan(ctx context.Context, cfg PrefetchConfig, resolveFn func(context.Context, string, uint16) (*Entry, error)) {
+	var candidates []cacheKey
+
+	m.mu.Lock()
+	for key, el := range m.entries {
+		entry := el.Value.(*Entry)
+		if entry.Expired() {
+			continue
+		}
+		if entry.HitCount.Load() < cfg.Threshold {
+			continue
+		}
+		remaining := time.Until(entry.ExpiresAt)
+		if remaining > cfg.Window {
+			continue
+		}
+		candidates = append(candidates, key)
+	}
+	m.mu.Unlock()
+
+	for _, key := range candidates {
+		key := key
+		if m.metrics != nil {
+			m.metrics.PrefetchesTotal.Inc()
+		}
+		go func() {
+			slog.Debug("Prefetching entry", "domain", key.domain, "type", key.qtype)
+			if _, err := resolveFn(ctx, key.domain, key.qtype); err != nil {
+				slog.Debug("Prefetch failed", "domain", key.domain, "type", key.qtype, "error", err)
+			}
+		}()
+	}
+}
+
+type persistEntry struct {
+	Domain        string               `json:"domain"`
+	QType         uint16               `json:"qtype"`
+	Flags         uint16               `json:"flags"`
+	RCode         uint16               `json:"rcode"`
+	AuthenticData bool                 `json:"authentic_data"`
+	Answers       []dns.ResourceRecord `json:"answers"`
+	Authorities   []dns.ResourceRecord `json:"authorities"`
+	Additionals   []dns.ResourceRecord `json:"additionals"`
+	ExpiresAt     time.Time            `json:"expires_at"`
+	HitCount      int64                `json:"hit_count"`
+	LastHitAt     time.Time            `json:"last_hit_at"`
+}
+
+func (m *Memory) Save(path string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	f, err := os.CreateTemp("", "northstar-cache-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := f.Name()
+
+	enc := json.NewEncoder(f)
+	for el := m.lruList.Front(); el != nil; el = el.Next() {
+		e := el.Value.(*Entry)
+		if e.Expired() {
+			continue
+		}
+		pe := persistEntry{
+			Domain:        e.Domain,
+			QType:         e.QType,
+			Flags:         e.Flags,
+			RCode:         e.RCode,
+			AuthenticData: e.AuthenticData,
+			Answers:       e.Answers,
+			Authorities:   e.Authorities,
+			Additionals:   e.Additionals,
+			ExpiresAt:     e.ExpiresAt,
+			HitCount:      e.HitCount.Load(),
+			LastHitAt:     e.LastHitAt(),
+		}
+		if err := enc.Encode(pe); err != nil {
+			if cerr := f.Close(); cerr != nil {
+				slog.Error("Cache save: close temp file after encode error", "error", cerr)
+			}
+			if rerr := os.Remove(tmpPath); rerr != nil {
+				slog.Error("Cache save: remove temp file after encode error", "path", tmpPath, "error", rerr)
+			}
+			return err
+		}
+	}
+	if err := f.Close(); err != nil {
+		if rerr := os.Remove(tmpPath); rerr != nil {
+			slog.Error("Cache save: remove temp file after close error", "path", tmpPath, "error", rerr)
+		}
+		return err
+	}
+	return os.Rename(tmpPath, path)
+}
+
+func (m *Memory) Load(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer func() {
+		if err := f.Close(); err != nil {
+			slog.Error("Cache load: close file", "path", path, "error", err)
+		}
+	}()
+
+	dec := json.NewDecoder(f)
+	for dec.More() {
+		var pe persistEntry
+		if err := dec.Decode(&pe); err != nil {
+			return err
+		}
+		if time.Now().After(pe.ExpiresAt) {
+			continue
+		}
+		e := &Entry{
+			Domain:        pe.Domain,
+			QType:         pe.QType,
+			Flags:         pe.Flags,
+			RCode:         pe.RCode,
+			AuthenticData: pe.AuthenticData,
+			Answers:       pe.Answers,
+			Authorities:   pe.Authorities,
+			Additionals:   pe.Additionals,
+			ExpiresAt:     pe.ExpiresAt,
+		}
+		e.HitCount.Store(pe.HitCount)
+		e.SetLastHitAt(pe.LastHitAt)
+		m.mu.Lock()
+		key := cacheKey{e.Domain, e.QType}
+		if el, ok := m.entries[key]; ok {
+			m.lruList.Remove(el)
+		}
+		m.evictOne()
+		el := m.lruList.PushFront(e)
+		m.entries[key] = el
+		m.mu.Unlock()
+	}
+	return nil
+}
+
 func (m *Memory) Close() {
 	close(m.stopCh)
+	m.prefetchWg.Wait()
 }

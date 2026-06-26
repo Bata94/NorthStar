@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -122,6 +123,15 @@ func main() {
 	default:
 		backend = cache.NewMemory(cfg.CacheMaxEntries, m)
 	}
+	if cfg.CachePersistPath != "" {
+		if mem, ok := backend.(*cache.Memory); ok {
+			if err := mem.Load(cfg.CachePersistPath); err != nil {
+				slog.Warn("Failed to load persisted cache", "path", cfg.CachePersistPath, "error", err)
+			} else {
+				slog.Info("Loaded persisted cache", "path", cfg.CachePersistPath, "entries", mem.Len())
+			}
+		}
+	}
 	defer backend.Close()
 
 	if cfg.CacheWarmup {
@@ -165,6 +175,10 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	if cfg.PrefetchEnable {
+		resolver.StartCachePrefetch(ctx, backend, m, &cfg, runtimeCfg, upstreamGroup)
+	}
 
 	sighupCh := make(chan os.Signal, 1)
 	signal.Notify(sighupCh, syscall.SIGHUP)
@@ -269,6 +283,17 @@ func main() {
 		time.Sleep(time.Second)
 	case <-ctx.Done():
 		slog.Warn("Shutting down...")
+	}
+
+	if cfg.CachePersistPath != "" {
+		if mem, ok := backend.(*cache.Memory); ok {
+			slog.Warn("Persisting cache to disk...")
+			if err := mem.Save(cfg.CachePersistPath); err != nil {
+				slog.Error("Failed to persist cache", "error", err)
+			} else {
+				slog.Info("Cache persisted", "path", cfg.CachePersistPath)
+			}
+		}
 	}
 
 	slog.Warn("Goodbye.")
@@ -454,13 +479,34 @@ func buildHooksWithBlocking(cfg *config.Config, c cache.Cache, m *metrics.Metric
 }
 
 func parseZones(cfg *config.Config) ([]*zone.Zone, error) {
-	var zones []*zone.Zone
-	for _, zc := range cfg.Zones {
-		z, err := zone.ParseZoneConfig(zc)
-		if err != nil {
-			return nil, err
+	if len(cfg.Zones) == 0 {
+		return nil, nil
+	}
+
+	type result struct {
+		z   *zone.Zone
+		err error
+	}
+
+	results := make([]result, len(cfg.Zones))
+	var wg sync.WaitGroup
+	for i, zc := range cfg.Zones {
+		wg.Add(1)
+		i, zc := i, zc
+		go func() {
+			defer wg.Done()
+			z, err := zone.ParseZoneConfig(zc)
+			results[i] = result{z, err}
+		}()
+	}
+	wg.Wait()
+
+	zones := make([]*zone.Zone, 0, len(cfg.Zones))
+	for _, r := range results {
+		if r.err != nil {
+			return nil, r.err
 		}
-		zones = append(zones, z)
+		zones = append(zones, r.z)
 	}
 	return zones, nil
 }

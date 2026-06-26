@@ -210,7 +210,13 @@ type FileConfig struct {
 	RateLimit            *int                         `yaml:"rate_limit"`
 	StaleAge             *int                         `yaml:"stale_age"`
 	NegativeTTL          *int                         `yaml:"negative_ttl"`
+	NegativeTTLMin       *int                         `yaml:"negative_ttl_min"`
 	CacheWarmup          *bool                        `yaml:"cache_warmup"`
+	CachePersistPath     *string                      `yaml:"cache_persist_path"`
+	PrefetchEnable       *bool                        `yaml:"prefetch_enable"`
+	PrefetchThreshold    *int                         `yaml:"prefetch_threshold"`
+	PrefetchWindow       *int                         `yaml:"prefetch_window"`
+	PrefetchInterval     *int                         `yaml:"prefetch_interval"`
 	CacheMaxEntries      *int                         `yaml:"cache_max_entries"`
 	TTLMin               *int                         `yaml:"ttl_min"`
 	TTLMax               *int                         `yaml:"ttl_max"`
@@ -367,8 +373,26 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 	if fc.NegativeTTL != nil {
 		cfg.NegativeTTL = *fc.NegativeTTL
 	}
+	if fc.NegativeTTLMin != nil {
+		cfg.NegativeTTLMin = *fc.NegativeTTLMin
+	}
 	if fc.CacheWarmup != nil {
 		cfg.CacheWarmup = *fc.CacheWarmup
+	}
+	if fc.CachePersistPath != nil {
+		cfg.CachePersistPath = *fc.CachePersistPath
+	}
+	if fc.PrefetchEnable != nil {
+		cfg.PrefetchEnable = *fc.PrefetchEnable
+	}
+	if fc.PrefetchThreshold != nil {
+		cfg.PrefetchThreshold = *fc.PrefetchThreshold
+	}
+	if fc.PrefetchWindow != nil {
+		cfg.PrefetchWindow = *fc.PrefetchWindow
+	}
+	if fc.PrefetchInterval != nil {
+		cfg.PrefetchInterval = *fc.PrefetchInterval
 	}
 	if fc.CacheMaxEntries != nil {
 		cfg.CacheMaxEntries = *fc.CacheMaxEntries
@@ -701,7 +725,13 @@ func configToFile(cfg *Config) *FileConfig {
 	rateLimit := cfg.RateLimit
 	staleAge := cfg.StaleAge
 	negativeTTL := cfg.NegativeTTL
+	negativeTTLMin := cfg.NegativeTTLMin
 	cacheWarmup := cfg.CacheWarmup
+	cachePersistPath := cfg.CachePersistPath
+	prefetchEnable := cfg.PrefetchEnable
+	prefetchThreshold := cfg.PrefetchThreshold
+	prefetchWindow := cfg.PrefetchWindow
+	prefetchInterval := cfg.PrefetchInterval
 	cacheMaxEntries := cfg.CacheMaxEntries
 	ttlMin := cfg.TTLMin
 	ttlMax := cfg.TTLMax
@@ -904,6 +934,7 @@ func configToFile(cfg *Config) *FileConfig {
 		RateLimit:          &rateLimit,
 		StaleAge:           &staleAge,
 		NegativeTTL:        &negativeTTL,
+		NegativeTTLMin:     &negativeTTLMin,
 		RateLimitFailClose: &rateLimitFailClose,
 		Tracing: &FileTracingConfig{
 			Enable:      &tracingEnable,
@@ -914,6 +945,11 @@ func configToFile(cfg *Config) *FileConfig {
 		ReusePort:            &reusePort,
 		ReusePortWorkers:     &reusePortWorkers,
 		CacheWarmup:          &cacheWarmup,
+		CachePersistPath:     &cachePersistPath,
+		PrefetchEnable:       &prefetchEnable,
+		PrefetchThreshold:    &prefetchThreshold,
+		PrefetchWindow:       &prefetchWindow,
+		PrefetchInterval:     &prefetchInterval,
 		CacheMaxEntries:      &cacheMaxEntries,
 		TTLMin:               &ttlMin,
 		TTLMax:               &ttlMax,
@@ -1126,7 +1162,13 @@ func WriteDefaultConfig(path string) error {
 	rateLimit := 0
 	staleAge := 60
 	negativeTTL := 0
+	negativeTTLMin := 0
 	cacheWarmup := false
+	cachePersistPath := ""
+	prefetchEnable := false
+	prefetchThreshold := 5
+	prefetchWindow := 30
+	prefetchInterval := 30
 	cacheMaxEntries := 0
 	ttlMin := 0
 	ttlMax := 0
@@ -1253,6 +1295,7 @@ func WriteDefaultConfig(path string) error {
 		RateLimit:          &rateLimit,
 		StaleAge:           &staleAge,
 		NegativeTTL:        &negativeTTL,
+		NegativeTTLMin:     &negativeTTLMin,
 		RateLimitFailClose: &rateLimitFailClose,
 		Tracing: &FileTracingConfig{
 			Enable:      &tracingEnable,
@@ -1263,6 +1306,11 @@ func WriteDefaultConfig(path string) error {
 		ReusePort:            &reusePort,
 		ReusePortWorkers:     &reusePortWorkers,
 		CacheWarmup:          &cacheWarmup,
+		CachePersistPath:     &cachePersistPath,
+		PrefetchEnable:       &prefetchEnable,
+		PrefetchThreshold:    &prefetchThreshold,
+		PrefetchWindow:       &prefetchWindow,
+		PrefetchInterval:     &prefetchInterval,
 		CacheMaxEntries:      &cacheMaxEntries,
 		TTLMin:               &ttlMin,
 		TTLMax:               &ttlMax,

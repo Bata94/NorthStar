@@ -219,6 +219,7 @@ type Config struct {
 	RateLimit            int
 	StaleAge             int
 	NegativeTTL          int
+	NegativeTTLMin       int
 	TTLMin               int
 	TTLMax               int
 	CacheMaxEntries      int
@@ -237,6 +238,11 @@ type Config struct {
 	DoQEnabled           bool
 	DoQPort              int
 	CacheWarmup          bool
+	CachePersistPath     string // path to persist in-memory cache on shutdown
+	PrefetchEnable       bool
+	PrefetchThreshold    int // minimum hit count for prefetch, default 5
+	PrefetchWindow       int // seconds before expiry to prefetch, default 30
+	PrefetchInterval     int // seconds between scan cycles, default 30
 	MaxTCPConnsPerClient int
 	DebugEnable          bool
 	MetricsEnable        bool
@@ -290,6 +296,7 @@ func Load() Config {
 		RateLimit:            0,
 		StaleAge:             60,
 		NegativeTTL:          0,
+		NegativeTTLMin:       0,
 		TTLMin:               0,
 		TTLMax:               0,
 		CacheMaxEntries:      0,
@@ -301,6 +308,11 @@ func Load() Config {
 		LogRetention:         7,
 		TimeZone:             "",
 		CacheWarmup:          false,
+		CachePersistPath:     "",
+		PrefetchEnable:       false,
+		PrefetchThreshold:    5,
+		PrefetchWindow:       30,
+		PrefetchInterval:     30,
 		MaxTCPConnsPerClient: 0,
 		DebugEnable:          false,
 		MetricsEnable:        false,
@@ -431,6 +443,7 @@ func Reload() (Config, error) {
 		RateLimit:            0,
 		StaleAge:             60,
 		NegativeTTL:          0,
+		NegativeTTLMin:       0,
 		TTLMin:               0,
 		TTLMax:               0,
 		CacheMaxEntries:      0,
@@ -443,6 +456,11 @@ func Reload() (Config, error) {
 		LogRetention:         7,
 		TimeZone:             "",
 		CacheWarmup:          false,
+		CachePersistPath:     "",
+		PrefetchEnable:       false,
+		PrefetchThreshold:    5,
+		PrefetchWindow:       30,
+		PrefetchInterval:     30,
 		MaxTCPConnsPerClient: 0,
 		MetricsEnable:        false,
 		MetricsPort:          9153,
@@ -589,8 +607,14 @@ func applyEnvOverrides(cfg *Config) {
 	if v, ok := os.LookupEnv("NORTHSTAR_DNS_STALE_AGE"); ok {
 		cfg.StaleAge = atoiOrZero(v)
 	}
+	if v, ok := os.LookupEnv("NORTHSTAR_DNS_NEGATIVE_TTL_CAP"); ok {
+		cfg.NegativeTTL = atoiOrZero(v)
+	}
 	if v, ok := os.LookupEnv("NORTHSTAR_DNS_NEGATIVE_TTL"); ok {
 		cfg.NegativeTTL = atoiOrZero(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_DNS_NEGATIVE_TTL_MIN"); ok {
+		cfg.NegativeTTLMin = atoiOrZero(v)
 	}
 	if v, ok := os.LookupEnv("NORTHSTAR_DNS_CACHE_MAX_ENTRIES"); ok {
 		cfg.CacheMaxEntries = atoiOrZero(v)
@@ -627,6 +651,21 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v, ok := os.LookupEnv("NORTHSTAR_DNS_CACHE_WARMUP"); ok {
 		cfg.CacheWarmup = isTrue(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_CACHE_PERSIST_PATH"); ok {
+		cfg.CachePersistPath = v
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_CACHE_PREFETCH_ENABLE"); ok {
+		cfg.PrefetchEnable = isTrue(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_CACHE_PREFETCH_THRESHOLD"); ok {
+		cfg.PrefetchThreshold = atoiOrZero(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_CACHE_PREFETCH_WINDOW"); ok {
+		cfg.PrefetchWindow = atoiOrZero(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_CACHE_PREFETCH_INTERVAL"); ok {
+		cfg.PrefetchInterval = atoiOrZero(v)
 	}
 	if v, ok := os.LookupEnv("NORTHSTAR_DNS_MAX_TCP_CONNS_PER_CLIENT"); ok {
 		cfg.MaxTCPConnsPerClient = atoiOrZero(v)
