@@ -17,6 +17,7 @@ import (
 	"github.com/bata94/northstar/api"
 	"github.com/bata94/northstar/cache"
 	"github.com/bata94/northstar/config"
+	"github.com/bata94/northstar/filter"
 	"github.com/bata94/northstar/hooks"
 	"github.com/bata94/northstar/log"
 	"github.com/bata94/northstar/metrics"
@@ -171,8 +172,9 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	blockingHook, _ := buildHooksWithBlocking(ctx, &cfg, backend, m, authHook, aclHook)
-	resolver.SetPipeline(buildPipeline(ctx, &cfg, backend, m, authHook, aclHook, tracer.Tracer()))
+	clientStats := filter.NewClientStatsCollector(1000)
+	blockingHook, _ := buildHooksWithBlocking(ctx, &cfg, backend, m, authHook, aclHook, clientStats)
+	resolver.SetPipeline(buildPipeline(ctx, &cfg, backend, m, authHook, aclHook, tracer.Tracer(), clientStats))
 
 	runtimeCfg := config.NewRuntimeConfig(&cfg)
 
@@ -186,7 +188,7 @@ func main() {
 	go func() {
 		for range sighupCh {
 			slog.Warn("SIGHUP received, reloading config...")
-			reloadConfig(runtimeCfg, upstreamGroup, backend, m, authHook, aclHook, tracer)
+			reloadConfig(runtimeCfg, upstreamGroup, backend, m, authHook, aclHook, tracer, clientStats)
 		}
 	}()
 
@@ -200,7 +202,7 @@ func main() {
 	}
 
 	if cfg.APIEnable {
-		apiSrv := api.New(&cfg, cfgPath, upstreamGroup, backend, m, blockingHook, authHook, aclHook)
+		apiSrv := api.New(&cfg, cfgPath, upstreamGroup, backend, m, blockingHook, authHook, aclHook, clientStats)
 		go func() {
 			if err := apiSrv.Serve(ctx); err != nil {
 				slog.Error("API server error", "error", err)
@@ -299,19 +301,19 @@ func main() {
 	slog.Warn("Goodbye.")
 }
 
-func buildPipeline(ctx context.Context, cfg *config.Config, c cache.Cache, m *metrics.Metrics, authHook *hooks.AuthoritativeHook, aclHook *hooks.AclHook, tr trace.Tracer) *hooks.Pipeline {
+func buildPipeline(ctx context.Context, cfg *config.Config, c cache.Cache, m *metrics.Metrics, authHook *hooks.AuthoritativeHook, aclHook *hooks.AclHook, tr trace.Tracer, clientStats *filter.ClientStatsCollector) *hooks.Pipeline {
 	p := hooks.NewPipeline()
 	if tr != nil {
 		p.SetTracer(tr)
 	}
-	_, hks := buildHooksWithBlocking(ctx, cfg, c, m, authHook, aclHook)
+	_, hks := buildHooksWithBlocking(ctx, cfg, c, m, authHook, aclHook, clientStats)
 	for _, h := range hks {
 		p.Register(h)
 	}
 	return p
 }
 
-func reloadConfig(runtimeCfg *config.RuntimeConfig, upstreamGroup *upstream.Group, c cache.Cache, m *metrics.Metrics, authHook *hooks.AuthoritativeHook, aclHook *hooks.AclHook, tracer *tracing.Tracing) {
+func reloadConfig(runtimeCfg *config.RuntimeConfig, upstreamGroup *upstream.Group, c cache.Cache, m *metrics.Metrics, authHook *hooks.AuthoritativeHook, aclHook *hooks.AclHook, tracer *tracing.Tracing, clientStats *filter.ClientStatsCollector) {
 	newCfg, err := config.Reload()
 	if err != nil {
 		slog.Error("Config reload failed", "error", err)
@@ -348,11 +350,11 @@ func reloadConfig(runtimeCfg *config.RuntimeConfig, upstreamGroup *upstream.Grou
 		}
 		slog.SetDefault(log.New(newLogLevel, newLogMode, newCfg.LogDir, newCfg.LogRetention))
 	}
-	resolver.SetPipeline(buildPipeline(context.Background(), &newCfg, c, m, authHook, aclHook, tracer.Tracer()))
+	resolver.SetPipeline(buildPipeline(context.Background(), &newCfg, c, m, authHook, aclHook, tracer.Tracer(), clientStats))
 	slog.Warn("Config reloaded")
 }
 
-func buildHooksWithBlocking(ctx context.Context, cfg *config.Config, c cache.Cache, m *metrics.Metrics, authHook *hooks.AuthoritativeHook, aclHook *hooks.AclHook) (*hooks.BlockingHook, []hooks.Hook) {
+func buildHooksWithBlocking(ctx context.Context, cfg *config.Config, c cache.Cache, m *metrics.Metrics, authHook *hooks.AuthoritativeHook, aclHook *hooks.AclHook, clientStats *filter.ClientStatsCollector) (*hooks.BlockingHook, []hooks.Hook) {
 	var result []hooks.Hook
 	var blockHook *hooks.BlockingHook
 
@@ -372,17 +374,34 @@ func buildHooksWithBlocking(ctx context.Context, cfg *config.Config, c cache.Cac
 		slog.Info("Special domain hook enabled")
 	}
 
-	rateCfg := cfg.Hooks.RateLimiting
-	if rateCfg.Rate == 0 && cfg.RateLimit > 0 {
-		rateCfg.Rate = cfg.RateLimit
+	tbCfg := cfg.Hooks.TokenBucket
+	if tbCfg.Rate > 0 && tbCfg.Enabled {
+		if tbCfg.Burst == 0 {
+			tbCfg.Burst = tbCfg.Rate
+		}
+		hook := hooks.NewTokenBucketRateLimitHook(
+			tbCfg.Rate,
+			tbCfg.Burst,
+			tbCfg.Action,
+			tbCfg.Priority,
+			tbCfg.Enabled,
+			tbCfg.Mode,
+		)
+		result = append(result, hook)
+		slog.Info("Token bucket rate limiting enabled", "rate", tbCfg.Rate, "burst", tbCfg.Burst, "mode", tbCfg.Mode)
+	} else {
+		rateCfg := cfg.Hooks.RateLimiting
+		if rateCfg.Rate == 0 && cfg.RateLimit > 0 {
+			rateCfg.Rate = cfg.RateLimit
+		}
+		result = append(result, hooks.NewRateLimitHook(
+			rateCfg.Rate,
+			rateCfg.Action,
+			rateCfg.Priority,
+			rateCfg.Enabled,
+			cfg.RateLimitFailClose,
+		))
 	}
-	result = append(result, hooks.NewRateLimitHook(
-		rateCfg.Rate,
-		rateCfg.Action,
-		rateCfg.Priority,
-		rateCfg.Enabled,
-		cfg.RateLimitFailClose,
-	))
 
 	blockCfg := cfg.Hooks.Blocking
 	if blockCfg.Enabled {
@@ -483,6 +502,28 @@ func buildHooksWithBlocking(ctx context.Context, cfg *config.Config, c cache.Cac
 			queryLogCfg.RetentionDays,
 		))
 		slog.Info("Query log enabled", "file", queryLogCfg.File)
+	}
+
+	if clientStats != nil && clientStats.Enabled() {
+		result = append(result, hooks.NewClientStatsHook(
+			true,
+			910,
+			clientStats,
+		))
+	}
+
+	rrlCfg := cfg.Hooks.ResponseRateLimiting
+	if rrlCfg.Rate > 0 || rrlCfg.Enabled {
+		result = append(result, hooks.NewResponseRateLimitHook(
+			rrlCfg.Rate,
+			rrlCfg.Slip,
+			rrlCfg.Action,
+			rrlCfg.Priority,
+			rrlCfg.Enabled,
+		))
+		if rrlCfg.Enabled {
+			slog.Info("Response Rate Limiting enabled", "rate", rrlCfg.Rate, "slip", rrlCfg.Slip, "action", rrlCfg.Action)
+		}
 	}
 
 	return blockHook, result

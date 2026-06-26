@@ -27,6 +27,28 @@ func ParseZoneConfig(cfg config.ZoneConfig) (*Zone, error) {
 		records = append(records, recs...)
 	}
 
+	var views []*ZoneView
+	for _, vc := range cfg.Views {
+		viewName := vc.Name
+		var subnet *net.IPNet
+		if vc.Subnet != "" {
+			_, parsed, err := net.ParseCIDR(vc.Subnet)
+			if err != nil {
+				return nil, fmt.Errorf("zone %q view %q: invalid subnet %q: %w", cfg.Name, viewName, vc.Subnet, err)
+			}
+			subnet = parsed
+		}
+		var viewRecords []Record
+		for _, rc := range vc.Records {
+			recs, err := parseRecordConfig(rc, name)
+			if err != nil {
+				return nil, fmt.Errorf("zone %q view %q record %q: %w", cfg.Name, viewName, rc.Type, err)
+			}
+			viewRecords = append(viewRecords, recs...)
+		}
+		views = append(views, NewZoneView(viewName, subnet, viewRecords))
+	}
+
 	var dnssec *DNSSECConfig
 	var signingKey crypto.Signer
 	if cfg.DNSSEC != nil && cfg.DNSSEC.Enabled {
@@ -53,7 +75,7 @@ func ParseZoneConfig(cfg config.ZoneConfig) (*Zone, error) {
 		}
 	}
 
-	return New(name, records, dnssec, signingKey), nil
+	return New(name, records, dnssec, signingKey, views), nil
 }
 
 func parseRecordConfig(rc config.ZoneRecordConfig, zone string) ([]Record, error) {

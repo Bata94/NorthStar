@@ -96,15 +96,17 @@ type FileTracingConfig struct {
 }
 
 type FileHookConfig struct {
-	RateLimiting  FileRateLimitHookConfig      `yaml:"rate_limiting"`
-	Blocking      *FileBlockingHookConfig      `yaml:"blocking"`
-	QMinimizer    *FileQMinimizerHookConfig    `yaml:"qminimizer"`
-	AnyQuery      *FileAnyQueryHookConfig      `yaml:"any_query"`
-	Dns64         *FileDns64HookConfig         `yaml:"dns64"`
-	ECS           *FileEcsHookConfig           `yaml:"ecs"`
-	Dnssec        *FileDnssecHookConfig        `yaml:"dnssec"`
-	QueryLog      *FileQueryLogHookConfig      `yaml:"query_log"`
-	SpecialDomain *FileSpecialDomainHookConfig `yaml:"special_domain"`
+	RateLimiting         FileRateLimitHookConfig          `yaml:"rate_limiting"`
+	TokenBucket          *FileTokenBucketHookConfig       `yaml:"token_bucket"`
+	ResponseRateLimiting *FileResponseRateLimitHookConfig `yaml:"response_rate_limiting"`
+	Blocking             *FileBlockingHookConfig          `yaml:"blocking"`
+	QMinimizer           *FileQMinimizerHookConfig        `yaml:"qminimizer"`
+	AnyQuery             *FileAnyQueryHookConfig          `yaml:"any_query"`
+	Dns64                *FileDns64HookConfig             `yaml:"dns64"`
+	ECS                  *FileEcsHookConfig               `yaml:"ecs"`
+	Dnssec               *FileDnssecHookConfig            `yaml:"dnssec"`
+	QueryLog             *FileQueryLogHookConfig          `yaml:"query_log"`
+	SpecialDomain        *FileSpecialDomainHookConfig     `yaml:"special_domain"`
 }
 
 type FileRateLimitHookConfig struct {
@@ -112,6 +114,23 @@ type FileRateLimitHookConfig struct {
 	Priority *int    `yaml:"priority"`
 	Rate     *int    `yaml:"rate"`
 	Action   *string `yaml:"action"`
+}
+
+type FileResponseRateLimitHookConfig struct {
+	Enabled  *bool   `yaml:"enabled"`
+	Priority *int    `yaml:"priority"`
+	Rate     *int    `yaml:"rate"`
+	Slip     *int    `yaml:"slip"`
+	Action   *string `yaml:"action"`
+}
+
+type FileTokenBucketHookConfig struct {
+	Enabled  *bool   `yaml:"enabled"`
+	Priority *int    `yaml:"priority"`
+	Rate     *int    `yaml:"rate"`
+	Burst    *int    `yaml:"burst"`
+	Action   *string `yaml:"action"`
+	Mode     *string `yaml:"mode"`
 }
 
 type FileUpstreamConfig struct {
@@ -188,10 +207,17 @@ type FileZoneDNSSECConfig struct {
 	NSEC3     *bool   `yaml:"nsec3,omitempty"`
 }
 
+type FileZoneViewConfig struct {
+	Name    *string                `yaml:"name"`
+	Subnet  *string                `yaml:"subnet"`
+	Records []FileZoneRecordConfig `yaml:"records,omitempty"`
+}
+
 type FileZoneConfig struct {
 	Name    *string                `yaml:"name"`
 	Records []FileZoneRecordConfig `yaml:"records,omitempty"`
 	DNSSEC  *FileZoneDNSSECConfig  `yaml:"dnssec,omitempty"`
+	Views   []FileZoneViewConfig   `yaml:"views,omitempty"`
 }
 
 type FileACLConfig struct {
@@ -538,6 +564,43 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 		if fc.Hooks.RateLimiting.Action != nil {
 			cfg.Hooks.RateLimiting.Action = *fc.Hooks.RateLimiting.Action
 		}
+		if fc.Hooks.TokenBucket != nil {
+			if fc.Hooks.TokenBucket.Enabled != nil {
+				cfg.Hooks.TokenBucket.Enabled = *fc.Hooks.TokenBucket.Enabled
+			}
+			if fc.Hooks.TokenBucket.Priority != nil {
+				cfg.Hooks.TokenBucket.Priority = *fc.Hooks.TokenBucket.Priority
+			}
+			if fc.Hooks.TokenBucket.Rate != nil {
+				cfg.Hooks.TokenBucket.Rate = *fc.Hooks.TokenBucket.Rate
+			}
+			if fc.Hooks.TokenBucket.Burst != nil {
+				cfg.Hooks.TokenBucket.Burst = *fc.Hooks.TokenBucket.Burst
+			}
+			if fc.Hooks.TokenBucket.Action != nil {
+				cfg.Hooks.TokenBucket.Action = *fc.Hooks.TokenBucket.Action
+			}
+			if fc.Hooks.TokenBucket.Mode != nil {
+				cfg.Hooks.TokenBucket.Mode = *fc.Hooks.TokenBucket.Mode
+			}
+		}
+		if fc.Hooks.ResponseRateLimiting != nil {
+			if fc.Hooks.ResponseRateLimiting.Enabled != nil {
+				cfg.Hooks.ResponseRateLimiting.Enabled = *fc.Hooks.ResponseRateLimiting.Enabled
+			}
+			if fc.Hooks.ResponseRateLimiting.Priority != nil {
+				cfg.Hooks.ResponseRateLimiting.Priority = *fc.Hooks.ResponseRateLimiting.Priority
+			}
+			if fc.Hooks.ResponseRateLimiting.Rate != nil {
+				cfg.Hooks.ResponseRateLimiting.Rate = *fc.Hooks.ResponseRateLimiting.Rate
+			}
+			if fc.Hooks.ResponseRateLimiting.Slip != nil {
+				cfg.Hooks.ResponseRateLimiting.Slip = *fc.Hooks.ResponseRateLimiting.Slip
+			}
+			if fc.Hooks.ResponseRateLimiting.Action != nil {
+				cfg.Hooks.ResponseRateLimiting.Action = *fc.Hooks.ResponseRateLimiting.Action
+			}
+		}
 		if fc.Hooks.QMinimizer != nil {
 			if fc.Hooks.QMinimizer.Enabled != nil {
 				cfg.Hooks.QMinimizer.Enabled = *fc.Hooks.QMinimizer.Enabled
@@ -804,6 +867,19 @@ func configToFile(cfg *Config) *FileConfig {
 	hookRate := cfg.Hooks.RateLimiting.Rate
 	hookAction := cfg.Hooks.RateLimiting.Action
 
+	tbEnabled := cfg.Hooks.TokenBucket.Enabled
+	tbPriority := cfg.Hooks.TokenBucket.Priority
+	tbRate := cfg.Hooks.TokenBucket.Rate
+	tbBurst := cfg.Hooks.TokenBucket.Burst
+	tbAction := cfg.Hooks.TokenBucket.Action
+	tbMode := cfg.Hooks.TokenBucket.Mode
+
+	rrlEnabled := cfg.Hooks.ResponseRateLimiting.Enabled
+	rrlPriority := cfg.Hooks.ResponseRateLimiting.Priority
+	rrlRate := cfg.Hooks.ResponseRateLimiting.Rate
+	rrlSlip := cfg.Hooks.ResponseRateLimiting.Slip
+	rrlAction := cfg.Hooks.ResponseRateLimiting.Action
+
 	blockingEnabled := cfg.Hooks.Blocking.Enabled
 	blockingPriority := cfg.Hooks.Blocking.Priority
 	blockingAction := cfg.Hooks.Blocking.BlockAction
@@ -927,6 +1003,24 @@ func configToFile(cfg *Config) *FileConfig {
 				fz.DNSSEC.ZSKFile = &z.DNSSEC.ZSKFile
 			}
 		}
+		if len(z.Views) > 0 {
+			fileViews := make([]FileZoneViewConfig, len(z.Views))
+			for vi, v := range z.Views {
+				viewRecords := make([]FileZoneRecordConfig, len(v.Records))
+				for ri, r := range v.Records {
+					viewRecords[ri] = zoneRecordToFile(r)
+				}
+				fv := FileZoneViewConfig{
+					Name:    &v.Name,
+					Records: viewRecords,
+				}
+				if v.Subnet != "" {
+					fv.Subnet = &v.Subnet
+				}
+				fileViews[vi] = fv
+			}
+			fz.Views = fileViews
+		}
 		fileZones = append(fileZones, fz)
 	}
 
@@ -1023,6 +1117,21 @@ func configToFile(cfg *Config) *FileConfig {
 				Priority: &hookPriority,
 				Rate:     &hookRate,
 				Action:   &hookAction,
+			},
+			TokenBucket: &FileTokenBucketHookConfig{
+				Enabled:  &tbEnabled,
+				Priority: &tbPriority,
+				Rate:     &tbRate,
+				Burst:    &tbBurst,
+				Action:   &tbAction,
+				Mode:     &tbMode,
+			},
+			ResponseRateLimiting: &FileResponseRateLimitHookConfig{
+				Enabled:  &rrlEnabled,
+				Priority: &rrlPriority,
+				Rate:     &rrlRate,
+				Slip:     &rrlSlip,
+				Action:   &rrlAction,
 			},
 			Blocking: &FileBlockingHookConfig{
 				Enabled:         &blockingEnabled,
@@ -1184,6 +1293,25 @@ func applyFileZones(cfg *Config, fc *FileConfig) {
 			}
 			cfg.Zones[i].DNSSEC = d
 		}
+		if len(fz.Views) > 0 {
+			cfg.Zones[i].Views = make([]ZoneViewConfig, len(fz.Views))
+			for vi, fv := range fz.Views {
+				zv := ZoneViewConfig{}
+				if fv.Name != nil {
+					zv.Name = *fv.Name
+				}
+				if fv.Subnet != nil {
+					zv.Subnet = *fv.Subnet
+				}
+				if len(fv.Records) > 0 {
+					zv.Records = make([]ZoneRecordConfig, len(fv.Records))
+					for j, fr := range fv.Records {
+						zv.Records[j] = fileZoneRecordToConfig(fr)
+					}
+				}
+				cfg.Zones[i].Views[vi] = zv
+			}
+		}
 	}
 }
 
@@ -1259,6 +1387,17 @@ func WriteDefaultConfig(path string) error {
 	hookPriority := 100
 	hookRate := 0
 	hookAction := "servfail"
+	tbEnabled := false
+	tbPriority := 100
+	tbRate := 0
+	tbBurst := 0
+	tbAction := "servfail"
+	tbMode := "memory"
+	rrlEnabled := false
+	rrlPriority := 800
+	rrlRate := 0
+	rrlSlip := 2
+	rrlAction := "drop"
 	blockingEnabled := false
 	blockingPriority := 200
 	blockingAction := "nxdomain"
@@ -1390,6 +1529,21 @@ func WriteDefaultConfig(path string) error {
 				Priority: &hookPriority,
 				Rate:     &hookRate,
 				Action:   &hookAction,
+			},
+			TokenBucket: &FileTokenBucketHookConfig{
+				Enabled:  &tbEnabled,
+				Priority: &tbPriority,
+				Rate:     &tbRate,
+				Burst:    &tbBurst,
+				Action:   &tbAction,
+				Mode:     &tbMode,
+			},
+			ResponseRateLimiting: &FileResponseRateLimitHookConfig{
+				Enabled:  &rrlEnabled,
+				Priority: &rrlPriority,
+				Rate:     &rrlRate,
+				Slip:     &rrlSlip,
+				Action:   &rrlAction,
 			},
 			Blocking: &FileBlockingHookConfig{
 				Enabled:         &blockingEnabled,

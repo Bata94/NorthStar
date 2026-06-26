@@ -54,7 +54,11 @@ func (h *AuthoritativeHook) Handle(ctx *Context) error {
 	if q.Type == dns.TypeAXFR || q.Type == dns.TypeIXFR {
 		resp = zone.BuildRefusedResponse(ctx.Request)
 	} else {
-		resp = zone.BuildResponse(ctx.Request, z, domain, q.Type)
+		if viewRecords, found := z.LookupInView(ctx.ClientIP, domain, q.Type); found {
+			resp = zone.BuildViewResponse(ctx.Request, z, domain, q.Type, viewRecords)
+		} else {
+			resp = zone.BuildResponse(ctx.Request, z, domain, q.Type)
+		}
 		resp = zone.AttachDNSSEC(z, resp, ctx.Request, z.SigningKey)
 	}
 

@@ -25,6 +25,23 @@ type RateLimitHookConfig struct {
 	Action   string
 }
 
+type TokenBucketHookConfig struct {
+	Enabled  bool
+	Priority int
+	Rate     int    // tokens per second
+	Burst    int    // max token accumulation; 0 = same as Rate
+	Action   string // "servfail" or "drop"
+	Mode     string // "memory" (default) or "valkey"
+}
+
+type ResponseRateLimitHookConfig struct {
+	Enabled  bool
+	Priority int    // default 800 (runs after DNSSEC, before send)
+	Rate     int    // responses per second per client/RCODE
+	Slip     int    // every Nth response is sent (default 2, 0 = never drop)
+	Action   string // "drop" (default) or "truncate"
+}
+
 type RPZConfig struct {
 	Path   string
 	Action string // nxdomain, sinkhole, passthru, drop
@@ -52,15 +69,17 @@ type BlockingHookConfig struct {
 }
 
 type HookConfig struct {
-	RateLimiting  RateLimitHookConfig
-	Blocking      BlockingHookConfig
-	QMinimizer    QMinimizerHookConfig
-	AnyQuery      AnyQueryHookConfig
-	Dns64         Dns64HookConfig
-	ECS           EcsHookConfig
-	Dnssec        DnssecHookConfig
-	QueryLog      QueryLogHookConfig
-	SpecialDomain SpecialDomainHookConfig
+	RateLimiting         RateLimitHookConfig
+	TokenBucket          TokenBucketHookConfig
+	ResponseRateLimiting ResponseRateLimitHookConfig
+	Blocking             BlockingHookConfig
+	QMinimizer           QMinimizerHookConfig
+	AnyQuery             AnyQueryHookConfig
+	Dns64                Dns64HookConfig
+	ECS                  EcsHookConfig
+	Dnssec               DnssecHookConfig
+	QueryLog             QueryLogHookConfig
+	SpecialDomain        SpecialDomainHookConfig
 }
 
 type UpstreamConfig struct {
@@ -181,10 +200,17 @@ type ZoneDNSSECConfig struct {
 	NSEC3     bool   `yaml:"nsec3"`
 }
 
+type ZoneViewConfig struct {
+	Name    string             `yaml:"name"`
+	Subnet  string             `yaml:"subnet"` // CIDR match for client IP
+	Records []ZoneRecordConfig `yaml:"records"`
+}
+
 type ZoneConfig struct {
 	Name    string             `yaml:"name"`
 	Records []ZoneRecordConfig `yaml:"records"`
 	DNSSEC  *ZoneDNSSECConfig  `yaml:"dnssec,omitempty"`
+	Views   []ZoneViewConfig   `yaml:"views,omitempty"`
 }
 
 type ACLConfig struct {
@@ -351,6 +377,21 @@ func Load() Config {
 				Rate:     0,
 				Action:   "servfail",
 			},
+			TokenBucket: TokenBucketHookConfig{
+				Enabled:  false,
+				Priority: 100,
+				Rate:     0,
+				Burst:    0,
+				Action:   "servfail",
+				Mode:     "memory",
+			},
+			ResponseRateLimiting: ResponseRateLimitHookConfig{
+				Enabled:  false,
+				Priority: 800,
+				Rate:     0,
+				Slip:     2,
+				Action:   "drop",
+			},
 			Blocking: BlockingHookConfig{
 				Enabled:         false,
 				Priority:        200,
@@ -501,6 +542,21 @@ func Reload() (Config, error) {
 				Priority: 100,
 				Rate:     0,
 				Action:   "servfail",
+			},
+			TokenBucket: TokenBucketHookConfig{
+				Enabled:  false,
+				Priority: 100,
+				Rate:     0,
+				Burst:    0,
+				Action:   "servfail",
+				Mode:     "memory",
+			},
+			ResponseRateLimiting: ResponseRateLimitHookConfig{
+				Enabled:  false,
+				Priority: 800,
+				Rate:     0,
+				Slip:     2,
+				Action:   "drop",
 			},
 			Blocking: BlockingHookConfig{
 				Enabled:         false,
@@ -693,6 +749,30 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v, ok := os.LookupEnv("NORTHSTAR_REUSE_PORT_WORKERS"); ok {
 		cfg.ReusePortWorkers = atoiOrZero(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_TOKEN_BUCKET_RATE"); ok {
+		cfg.Hooks.TokenBucket.Rate = atoiOrZero(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_TOKEN_BUCKET_BURST"); ok {
+		cfg.Hooks.TokenBucket.Burst = atoiOrZero(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_TOKEN_BUCKET_ACTION"); ok {
+		cfg.Hooks.TokenBucket.Action = v
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_TOKEN_BUCKET_MODE"); ok {
+		cfg.Hooks.TokenBucket.Mode = v
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_RRL_ENABLED"); ok {
+		cfg.Hooks.ResponseRateLimiting.Enabled = isTrue(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_RRL_RATE"); ok {
+		cfg.Hooks.ResponseRateLimiting.Rate = atoiOrZero(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_RRL_SLIP"); ok {
+		cfg.Hooks.ResponseRateLimiting.Slip = atoiOrZero(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_RRL_ACTION"); ok {
+		cfg.Hooks.ResponseRateLimiting.Action = v
 	}
 	if v, ok := os.LookupEnv("NORTHSTAR_RATE_LIMIT_FAIL_CLOSE"); ok {
 		cfg.RateLimitFailClose = isTrue(v)

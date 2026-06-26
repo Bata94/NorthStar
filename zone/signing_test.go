@@ -159,7 +159,7 @@ func TestBuildNSECChain(t *testing.T) {
 		&ARecord{Name: "example.com.", TTLSec: 300, IP: net.ParseIP("192.0.2.1")},
 		&ARecord{Name: "www.example.com.", TTLSec: 300, IP: net.ParseIP("192.0.2.2")},
 		&MXRecord{Name: "example.com.", TTLSec: 300, Preference: 10, Host: "mail.example.com."},
-	}, nil, nil)
+	}, nil, nil, nil)
 
 	chain := BuildNSECChain(z)
 	if len(chain) == 0 {
@@ -195,7 +195,7 @@ func TestAttachDNSSEC(t *testing.T) {
 	}, &DNSSECConfig{
 		Enabled:   true,
 		Algorithm: dns.AlgECDSAP256,
-	}, key)
+	}, key, nil)
 
 	req := &dns.Message{
 		Header: dns.Header{ID: 42, Flags: 0x0100, QDCount: 1},
@@ -247,7 +247,7 @@ func TestAttachDNSSECNoDOBit(t *testing.T) {
 	}, &DNSSECConfig{
 		Enabled:   true,
 		Algorithm: dns.AlgECDSAP256,
-	}, nil)
+	}, nil, nil)
 
 	req := &dns.Message{
 		Header: dns.Header{ID: 42, Flags: 0x0100, QDCount: 1},

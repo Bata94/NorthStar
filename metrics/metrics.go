@@ -12,6 +12,7 @@ import (
 
 type Metrics struct {
 	QueriesTotal            *prometheus.CounterVec
+	RRLDroppedTotal         *prometheus.CounterVec
 	CacheLookups            prometheus.Counter
 	CacheHits               prometheus.Counter
 	CacheEvictionsTotal     *prometheus.CounterVec
@@ -47,6 +48,14 @@ func New() *Metrics {
 		Help:      "Total DNS queries received by type (qtype).",
 	}, []string{"qtype"})
 	reg.MustRegister(m.QueriesTotal)
+
+	m.RRLDroppedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "northstar",
+		Subsystem: "rrl",
+		Name:      "dropped_total",
+		Help:      "Total responses dropped by RRL, by action and rcode.",
+	}, []string{"action", "rcode"})
+	reg.MustRegister(m.RRLDroppedTotal)
 
 	m.CacheLookups = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: "northstar",

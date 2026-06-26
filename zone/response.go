@@ -81,6 +81,70 @@ func BuildResponse(req *dns.Message, zone *Zone, qname string, qtype uint16) *dn
 	}
 }
 
+func BuildViewResponse(req *dns.Message, zone *Zone, qname string, qtype uint16, viewRecords []Record) *dns.Message {
+	maxPayload := extractMaxPayload(req)
+	flags := uint16(0x8500)
+
+	var answers, authorities, additionals []dns.ResourceRecord
+
+	if len(viewRecords) > 0 {
+		if qtype == dns.TypeCNAME || qtype == dns.TypeANY {
+			for _, r := range viewRecords {
+				answers = append(answers, recordToRR(r))
+			}
+		} else {
+			cnameRecords, hasCNAME := zone.Lookup(qname, dns.TypeCNAME)
+			if hasCNAME {
+				for _, r := range cnameRecords {
+					answers = append(answers, recordToRR(r))
+				}
+				if cr, ok := cnameRecords[0].(*CNAMERecord); ok {
+					if cnameAnswers, cnameFound := zone.Lookup(cr.Target, qtype); cnameFound {
+						for _, r := range cnameAnswers {
+							answers = append(answers, recordToRR(r))
+						}
+					}
+				}
+			}
+			for _, r := range viewRecords {
+				answers = append(answers, recordToRR(r))
+			}
+		}
+		flags |= 0x0000
+	} else {
+		flags |= 0x0003
+	}
+
+	soa := zone.SOA()
+	if soa != nil {
+		authorities = append(authorities, recordToRR(soa))
+	}
+	for _, ns := range zone.NS() {
+		authorities = append(authorities, recordToRR(ns))
+	}
+
+	additionals = append(additionals, dns.ResourceRecord{
+		Name:  "",
+		Type:  dns.TypeOPT,
+		Class: maxPayload,
+	})
+
+	return &dns.Message{
+		Header: dns.Header{
+			ID:      req.Header.ID,
+			Flags:   flags,
+			QDCount: 1,
+			ANCount: uint16(len(answers)),
+			NSCount: uint16(len(authorities)),
+			ARCount: uint16(len(additionals)),
+		},
+		Questions:   req.Questions,
+		Answers:     answers,
+		Authorities: authorities,
+		Additionals: additionals,
+	}
+}
+
 func BuildNXDOMAIN(req *dns.Message, zone *Zone, qname string) *dns.Message {
 	maxPayload := extractMaxPayload(req)
 

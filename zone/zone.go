@@ -279,21 +279,69 @@ type DNSSECConfig struct {
 	NSEC3     bool
 }
 
+type ZoneView struct {
+	Name    string
+	Subnet  *net.IPNet
+	Records []Record
+	byName  map[string][]Record
+}
+
+func NewZoneView(name string, subnet *net.IPNet, records []Record) *ZoneView {
+	zv := &ZoneView{
+		Name:    name,
+		Subnet:  subnet,
+		Records: records,
+		byName:  make(map[string][]Record),
+	}
+	for _, r := range records {
+		n := r.DNSName()
+		zv.byName[n] = append(zv.byName[n], r)
+	}
+	return zv
+}
+
+func (zv *ZoneView) Lookup(name string, qtype uint16) ([]Record, bool) {
+	records, ok := zv.byName[name]
+	if !ok {
+		return nil, false
+	}
+	if qtype == dns.TypeANY {
+		return records, true
+	}
+	if qtype == dns.TypeCNAME {
+		for _, r := range records {
+			if r.DNSType() == dns.TypeCNAME {
+				return []Record{r}, true
+			}
+		}
+		return nil, false
+	}
+	var matched []Record
+	for _, r := range records {
+		if r.DNSType() == qtype {
+			matched = append(matched, r)
+		}
+	}
+	return matched, len(matched) > 0
+}
+
 type Zone struct {
 	Name       string
 	Records    []Record
 	DNSSEC     *DNSSECConfig
 	SigningKey crypto.Signer
+	Views      []*ZoneView
 
 	byName map[string][]Record
 }
 
-func New(name string, records []Record, dnssec *DNSSECConfig, signingKey crypto.Signer) *Zone {
+func New(name string, records []Record, dnssec *DNSSECConfig, signingKey crypto.Signer, views []*ZoneView) *Zone {
 	z := &Zone{
 		Name:       name,
 		Records:    records,
 		DNSSEC:     dnssec,
 		SigningKey: signingKey,
+		Views:      views,
 		byName:     make(map[string][]Record),
 	}
 	for _, r := range records {
@@ -301,6 +349,19 @@ func New(name string, records []Record, dnssec *DNSSECConfig, signingKey crypto.
 		z.byName[n] = append(z.byName[n], r)
 	}
 	return z
+}
+
+func (z *Zone) LookupInView(clientIP string, name string, qtype uint16) ([]Record, bool) {
+	parsedIP := net.ParseIP(clientIP)
+	if parsedIP == nil || len(z.Views) == 0 {
+		return nil, false
+	}
+	for _, view := range z.Views {
+		if view.Subnet != nil && view.Subnet.Contains(parsedIP) {
+			return view.Lookup(name, qtype)
+		}
+	}
+	return nil, false
 }
 
 func (z *Zone) Lookup(name string, qtype uint16) ([]Record, bool) {

@@ -105,7 +105,7 @@ func TestZoneLookupExact(t *testing.T) {
 	z := New("example.com.", []Record{
 		&ARecord{Name: "example.com.", TTLSec: 300, IP: net.ParseIP("192.0.2.1")},
 		&ARecord{Name: "www.example.com.", TTLSec: 300, IP: net.ParseIP("192.0.2.2")},
-	}, nil, nil)
+	}, nil, nil, nil)
 
 	records, found := z.Lookup("www.example.com.", dns.TypeA)
 	if !found {
@@ -119,7 +119,7 @@ func TestZoneLookupExact(t *testing.T) {
 func TestZoneLookupNotFound(t *testing.T) {
 	z := New("example.com.", []Record{
 		&ARecord{Name: "example.com.", TTLSec: 300, IP: net.ParseIP("192.0.2.1")},
-	}, nil, nil)
+	}, nil, nil, nil)
 
 	_, found := z.Lookup("nonexistent.example.com.", dns.TypeA)
 	if found {
@@ -131,7 +131,7 @@ func TestZoneLookupWrongType(t *testing.T) {
 	z := New("example.com.", []Record{
 		&ARecord{Name: "example.com.", TTLSec: 300, IP: net.ParseIP("192.0.2.1")},
 		&MXRecord{Name: "example.com.", TTLSec: 300, Preference: 10, Host: "mail.example.com."},
-	}, nil, nil)
+	}, nil, nil, nil)
 
 	records, found := z.Lookup("example.com.", dns.TypeMX)
 	if !found {
@@ -146,7 +146,7 @@ func TestZoneLookupANY(t *testing.T) {
 	z := New("example.com.", []Record{
 		&ARecord{Name: "example.com.", TTLSec: 300, IP: net.ParseIP("192.0.2.1")},
 		&NSRecord{Name: "example.com.", TTLSec: 3600, Target: "ns1.example.com."},
-	}, nil, nil)
+	}, nil, nil, nil)
 
 	records, found := z.Lookup("example.com.", dns.TypeANY)
 	if !found {
@@ -165,7 +165,7 @@ func TestBuildResponseAQuery(t *testing.T) {
 			MName: "ns1.example.com.", RName: "admin.example.com.",
 			Serial: 1, Refresh: 3600, Retry: 900, Expire: 86400, Minimum: 3600,
 		},
-	}, nil, nil)
+	}, nil, nil, nil)
 
 	req := &dns.Message{
 		Header: dns.Header{ID: 42, Flags: 0x0100, QDCount: 1},
@@ -203,7 +203,7 @@ func TestBuildResponseNXDOMAIN(t *testing.T) {
 			MName: "ns1.example.com.", RName: "admin.example.com.",
 			Serial: 1, Refresh: 3600, Retry: 900, Expire: 86400, Minimum: 3600,
 		},
-	}, nil, nil)
+	}, nil, nil, nil)
 
 	req := &dns.Message{
 		Header: dns.Header{ID: 1, Flags: 0x0100, QDCount: 1},
@@ -287,10 +287,10 @@ func TestParseZoneConfigBasic(t *testing.T) {
 func TestZoneSetLookup(t *testing.T) {
 	z1 := New("example.com.", []Record{
 		&ARecord{Name: "example.com.", TTLSec: 300, IP: net.ParseIP("192.0.2.1")},
-	}, nil, nil)
+	}, nil, nil, nil)
 	z2 := New("test.org.", []Record{
 		&ARecord{Name: "test.org.", TTLSec: 300, IP: net.ParseIP("198.51.100.1")},
-	}, nil, nil)
+	}, nil, nil, nil)
 
 	s := NewSet([]*Zone{z1, z2})
 

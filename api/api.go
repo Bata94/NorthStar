@@ -11,35 +11,38 @@ import (
 
 	"github.com/bata94/northstar/cache"
 	"github.com/bata94/northstar/config"
+	"github.com/bata94/northstar/filter"
 	"github.com/bata94/northstar/hooks"
 	"github.com/bata94/northstar/metrics"
 	"github.com/bata94/northstar/upstream"
 )
 
 type Server struct {
-	cfg      *config.Config
-	cfgPath  string
-	upstream *upstream.Group
-	cache    cache.Cache
-	metrics  *metrics.Metrics
-	blocking *hooks.BlockingHook
-	authHook *hooks.AuthoritativeHook
-	aclHook  *hooks.AclHook
-	http     *http.Server
-	started  time.Time
+	cfg         *config.Config
+	cfgPath     string
+	upstream    *upstream.Group
+	cache       cache.Cache
+	metrics     *metrics.Metrics
+	blocking    *hooks.BlockingHook
+	authHook    *hooks.AuthoritativeHook
+	aclHook     *hooks.AclHook
+	clientStats *filter.ClientStatsCollector
+	http        *http.Server
+	started     time.Time
 }
 
-func New(cfg *config.Config, cfgPath string, up *upstream.Group, c cache.Cache, m *metrics.Metrics, bh *hooks.BlockingHook, ah *hooks.AuthoritativeHook, ach *hooks.AclHook) *Server {
+func New(cfg *config.Config, cfgPath string, up *upstream.Group, c cache.Cache, m *metrics.Metrics, bh *hooks.BlockingHook, ah *hooks.AuthoritativeHook, ach *hooks.AclHook, cs *filter.ClientStatsCollector) *Server {
 	return &Server{
-		cfg:      cfg,
-		cfgPath:  cfgPath,
-		upstream: up,
-		cache:    c,
-		metrics:  m,
-		blocking: bh,
-		authHook: ah,
-		aclHook:  ach,
-		started:  time.Now(),
+		cfg:         cfg,
+		cfgPath:     cfgPath,
+		upstream:    up,
+		cache:       c,
+		metrics:     m,
+		blocking:    bh,
+		authHook:    ah,
+		aclHook:     ach,
+		clientStats: cs,
+		started:     time.Now(),
 	}
 }
 
@@ -129,6 +132,10 @@ func (s *Server) Serve(ctx context.Context) error {
 	mux.HandleFunc("GET /api/v1/filter/analytics/daily-trend", s.auth(s.handleAnalyticsDailyTrend))
 	mux.HandleFunc("DELETE /api/v1/filter/analytics", s.auth(s.handleAnalyticsReset))
 
+	mux.HandleFunc("GET /api/v1/clients", s.auth(s.handleClientList))
+	mux.HandleFunc("GET /api/v1/clients/{ip}", s.auth(s.handleClientGet))
+	mux.HandleFunc("GET /api/v1/clients/top", s.auth(s.handleClientTop))
+	mux.HandleFunc("DELETE /api/v1/clients", s.auth(s.handleClientReset))
 	mux.HandleFunc("POST /api/v1/reload", s.auth(s.handleReload))
 
 	addr := fmt.Sprintf(":%d", s.cfg.APIPort)

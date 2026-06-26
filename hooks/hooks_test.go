@@ -128,6 +128,115 @@ func TestRateLimitZeroRate(t *testing.T) {
 	}
 }
 
+func TestTokenBucketRateLimitHook(t *testing.T) {
+	mem := cache.NewMemory(0, nil)
+	defer mem.Close()
+
+	m := metrics.New()
+
+	hook := NewTokenBucketRateLimitHook(5, 5, "servfail", 100, true, "memory")
+	p := NewPipeline()
+	p.Register(hook)
+
+	ctx := &Context{
+		Ctx: context.Background(),
+		Request: &dns.Message{
+			Header:    dns.Header{ID: 42, QDCount: 1},
+			Questions: []dns.Question{{Name: "example.com", Type: 1, Class: 1}},
+		},
+		ClientIP: "10.0.0.1",
+		Network:  "udp",
+		Cache:    mem,
+		Metrics:  m,
+		Send:     func(_ []byte) error { return nil },
+	}
+
+	for i := 0; i < 5; i++ {
+		if err := p.Run(PreResolve, ctx); err != nil {
+			t.Fatalf("call %d: unexpected error: %v", i, err)
+		}
+	}
+
+	if err := p.Run(PreResolve, ctx); err != ErrRateLimited {
+		t.Errorf("expected ErrRateLimited, got %v", err)
+	}
+}
+
+func TestTokenBucketRateLimitDropAction(t *testing.T) {
+	mem := cache.NewMemory(0, nil)
+	defer mem.Close()
+
+	m := metrics.New()
+
+	hook := NewTokenBucketRateLimitHook(1, 1, "drop", 100, true, "memory")
+	p := NewPipeline()
+	p.Register(hook)
+
+	sendCalled := false
+	ctx := &Context{
+		Ctx: context.Background(),
+		Request: &dns.Message{
+			Header:    dns.Header{ID: 42, QDCount: 1},
+			Questions: []dns.Question{{Name: "example.com", Type: 1, Class: 1}},
+		},
+		ClientIP: "10.0.0.2",
+		Network:  "udp",
+		Cache:    mem,
+		Metrics:  m,
+		Send: func(_ []byte) error {
+			sendCalled = true
+			return nil
+		},
+	}
+
+	if err := p.Run(PreResolve, ctx); err != nil {
+		t.Fatalf("first call: unexpected error: %v", err)
+	}
+
+	if err := p.Run(PreResolve, ctx); err != ErrRateLimited {
+		t.Errorf("expected ErrRateLimited, got %v", err)
+	}
+	if sendCalled {
+		t.Error("Send should not be called with 'drop' action")
+	}
+}
+
+func TestTokenBucketClientIsolation(t *testing.T) {
+	mem := cache.NewMemory(0, nil)
+	defer mem.Close()
+
+	m := metrics.New()
+
+	hook := NewTokenBucketRateLimitHook(3, 3, "servfail", 100, true, "memory")
+	p := NewPipeline()
+	p.Register(hook)
+
+	for _, ip := range []string{"10.0.0.1", "10.0.0.2"} {
+		ctx := &Context{
+			Ctx: context.Background(),
+			Request: &dns.Message{
+				Header:    dns.Header{ID: 42, QDCount: 1},
+				Questions: []dns.Question{{Name: "example.com", Type: 1, Class: 1}},
+			},
+			ClientIP: ip,
+			Network:  "udp",
+			Cache:    mem,
+			Metrics:  m,
+			Send:     func(_ []byte) error { return nil },
+		}
+
+		for i := 0; i < 3; i++ {
+			if err := p.Run(PreResolve, ctx); err != nil {
+				t.Fatalf("client %s call %d: unexpected error: %v", ip, i, err)
+			}
+		}
+
+		if err := p.Run(PreResolve, ctx); err != ErrRateLimited {
+			t.Errorf("client %s: expected ErrRateLimited, got %v", ip, err)
+		}
+	}
+}
+
 func TestPipelineReset(t *testing.T) {
 	p := NewPipeline()
 	hook := NewRateLimitHook(5, "servfail", 100, true, false)
