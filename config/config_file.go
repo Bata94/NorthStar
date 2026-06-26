@@ -78,6 +78,13 @@ type FileSpecialDomainHookConfig struct {
 	Priority *int  `yaml:"priority"`
 }
 
+type FileTracingConfig struct {
+	Enable      *bool    `yaml:"enable"`
+	Endpoint    *string  `yaml:"endpoint"`
+	ServiceName *string  `yaml:"service_name"`
+	SampleRate  *float64 `yaml:"sample_rate"`
+}
+
 type FileHookConfig struct {
 	RateLimiting  FileRateLimitHookConfig      `yaml:"rate_limiting"`
 	Blocking      *FileBlockingHookConfig      `yaml:"blocking"`
@@ -236,6 +243,7 @@ type FileConfig struct {
 	ReusePortWorkers     *int                         `yaml:"reuse_port_workers"`
 	RateLimitFailClose   *bool                        `yaml:"rate_limit_fail_close"`
 	ACLs                 []FileACLConfig              `yaml:"acls,omitempty"`
+	Tracing              *FileTracingConfig           `yaml:"tracing"`
 	Hooks                *FileHookConfig              `yaml:"hooks"`
 }
 
@@ -409,6 +417,20 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 	}
 	if fc.RateLimitFailClose != nil {
 		cfg.RateLimitFailClose = *fc.RateLimitFailClose
+	}
+	if fc.Tracing != nil {
+		if fc.Tracing.Enable != nil {
+			cfg.Tracing.Enable = *fc.Tracing.Enable
+		}
+		if fc.Tracing.Endpoint != nil {
+			cfg.Tracing.Endpoint = *fc.Tracing.Endpoint
+		}
+		if fc.Tracing.ServiceName != nil {
+			cfg.Tracing.ServiceName = *fc.Tracing.ServiceName
+		}
+		if fc.Tracing.SampleRate != nil {
+			cfg.Tracing.SampleRate = *fc.Tracing.SampleRate
+		}
 	}
 	if fc.MetricsEnable != nil {
 		cfg.MetricsEnable = *fc.MetricsEnable
@@ -694,6 +716,10 @@ func configToFile(cfg *Config) *FileConfig {
 	maxTCPConnsPerClient := cfg.MaxTCPConnsPerClient
 	debugEnable := cfg.DebugEnable
 	rateLimitFailClose := cfg.RateLimitFailClose
+	tracingEnable := cfg.Tracing.Enable
+	tracingEndpoint := cfg.Tracing.Endpoint
+	tracingServiceName := cfg.Tracing.ServiceName
+	tracingSampleRate := cfg.Tracing.SampleRate
 	reusePort := cfg.ReusePort
 	reusePortWorkers := cfg.ReusePortWorkers
 	metricsEnable := cfg.MetricsEnable
@@ -875,10 +901,16 @@ func configToFile(cfg *Config) *FileConfig {
 			MinVersion:     &tls.MinVersion,
 			AutoSelfSigned: &tls.AutoSelfSigned,
 		},
-		RateLimit:            &rateLimit,
-		StaleAge:             &staleAge,
-		NegativeTTL:          &negativeTTL,
-		RateLimitFailClose:   &rateLimitFailClose,
+		RateLimit:          &rateLimit,
+		StaleAge:           &staleAge,
+		NegativeTTL:        &negativeTTL,
+		RateLimitFailClose: &rateLimitFailClose,
+		Tracing: &FileTracingConfig{
+			Enable:      &tracingEnable,
+			Endpoint:    &tracingEndpoint,
+			ServiceName: &tracingServiceName,
+			SampleRate:  &tracingSampleRate,
+		},
 		ReusePort:            &reusePort,
 		ReusePortWorkers:     &reusePortWorkers,
 		CacheWarmup:          &cacheWarmup,
@@ -1109,6 +1141,10 @@ func WriteDefaultConfig(path string) error {
 	maxTCPConnsPerClient := 0
 	debugEnable := false
 	rateLimitFailClose := false
+	tracingEnable := false
+	tracingEndpoint := "localhost:4317"
+	tracingServiceName := "northstar"
+	tracingSampleRate := 0.1
 	reusePort := true
 	reusePortWorkers := 0
 	metricsEnable := false
@@ -1214,10 +1250,16 @@ func WriteDefaultConfig(path string) error {
 			MinVersion:     &tlsMinVer,
 			AutoSelfSigned: &autoSelfSigned,
 		},
-		RateLimit:            &rateLimit,
-		StaleAge:             &staleAge,
-		NegativeTTL:          &negativeTTL,
-		RateLimitFailClose:   &rateLimitFailClose,
+		RateLimit:          &rateLimit,
+		StaleAge:           &staleAge,
+		NegativeTTL:        &negativeTTL,
+		RateLimitFailClose: &rateLimitFailClose,
+		Tracing: &FileTracingConfig{
+			Enable:      &tracingEnable,
+			Endpoint:    &tracingEndpoint,
+			ServiceName: &tracingServiceName,
+			SampleRate:  &tracingSampleRate,
+		},
 		ReusePort:            &reusePort,
 		ReusePortWorkers:     &reusePortWorkers,
 		CacheWarmup:          &cacheWarmup,

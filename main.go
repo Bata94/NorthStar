@@ -22,8 +22,10 @@ import (
 	"github.com/bata94/northstar/node"
 	"github.com/bata94/northstar/resolver"
 	"github.com/bata94/northstar/tls"
+	"github.com/bata94/northstar/tracing"
 	"github.com/bata94/northstar/upstream"
 	"github.com/bata94/northstar/zone"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var Version = "dev"
@@ -69,6 +71,30 @@ func main() {
 	slog.Warn("starting northstar", "version", Version, "instance_id", node.InstanceID(), "node_name", node.NodeName(cfg.NodeName))
 
 	m := metrics.New()
+
+	tracer, err := tracing.New(tracing.Config{
+		Enable:      cfg.Tracing.Enable,
+		Endpoint:    cfg.Tracing.Endpoint,
+		ServiceName: cfg.Tracing.ServiceName,
+		SampleRate:  cfg.Tracing.SampleRate,
+		InstanceID:  node.InstanceID(),
+		NodeName:    node.NodeName(cfg.NodeName),
+	})
+	if err != nil {
+		slog.Warn("Tracing initialization failed, continuing without tracing", "error", err)
+	}
+	if tracer != nil {
+		resolver.SetTracer(tracer.Tracer())
+	}
+	defer func() {
+		if tracer != nil {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := tracer.Shutdown(shutdownCtx); err != nil {
+				slog.Error("Tracing shutdown error", "error", err)
+			}
+		}
+	}()
 
 	var backend cache.Cache
 	switch {
@@ -133,7 +159,7 @@ func main() {
 	aclHook := hooks.NewAclHook(aclRuleset)
 
 	blockingHook, _ := buildHooksWithBlocking(&cfg, backend, m, authHook, aclHook)
-	resolver.SetPipeline(buildPipeline(&cfg, backend, m, authHook, aclHook))
+	resolver.SetPipeline(buildPipeline(&cfg, backend, m, authHook, aclHook, tracer.Tracer()))
 
 	runtimeCfg := config.NewRuntimeConfig(&cfg)
 
@@ -146,7 +172,7 @@ func main() {
 	go func() {
 		for range sighupCh {
 			slog.Warn("SIGHUP received, reloading config...")
-			reloadConfig(runtimeCfg, upstreamGroup, backend, m, authHook, aclHook)
+			reloadConfig(runtimeCfg, upstreamGroup, backend, m, authHook, aclHook, tracer)
 		}
 	}()
 
@@ -248,8 +274,11 @@ func main() {
 	slog.Warn("Goodbye.")
 }
 
-func buildPipeline(cfg *config.Config, c cache.Cache, m *metrics.Metrics, authHook *hooks.AuthoritativeHook, aclHook *hooks.AclHook) *hooks.Pipeline {
+func buildPipeline(cfg *config.Config, c cache.Cache, m *metrics.Metrics, authHook *hooks.AuthoritativeHook, aclHook *hooks.AclHook, tr trace.Tracer) *hooks.Pipeline {
 	p := hooks.NewPipeline()
+	if tr != nil {
+		p.SetTracer(tr)
+	}
 	_, hks := buildHooksWithBlocking(cfg, c, m, authHook, aclHook)
 	for _, h := range hks {
 		p.Register(h)
@@ -257,7 +286,7 @@ func buildPipeline(cfg *config.Config, c cache.Cache, m *metrics.Metrics, authHo
 	return p
 }
 
-func reloadConfig(runtimeCfg *config.RuntimeConfig, upstreamGroup *upstream.Group, c cache.Cache, m *metrics.Metrics, authHook *hooks.AuthoritativeHook, aclHook *hooks.AclHook) {
+func reloadConfig(runtimeCfg *config.RuntimeConfig, upstreamGroup *upstream.Group, c cache.Cache, m *metrics.Metrics, authHook *hooks.AuthoritativeHook, aclHook *hooks.AclHook, tracer *tracing.Tracing) {
 	newCfg, err := config.Reload()
 	if err != nil {
 		slog.Error("Config reload failed", "error", err)
@@ -294,7 +323,7 @@ func reloadConfig(runtimeCfg *config.RuntimeConfig, upstreamGroup *upstream.Grou
 		}
 		slog.SetDefault(log.New(newLogLevel, newLogMode, newCfg.LogDir, newCfg.LogRetention))
 	}
-	resolver.SetPipeline(buildPipeline(&newCfg, c, m, authHook, aclHook))
+	resolver.SetPipeline(buildPipeline(&newCfg, c, m, authHook, aclHook, tracer.Tracer()))
 	slog.Warn("Config reloaded")
 }
 

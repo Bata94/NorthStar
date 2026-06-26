@@ -12,6 +12,8 @@ import (
 	"github.com/bata94/northstar/cache"
 	"github.com/bata94/northstar/dns"
 	"github.com/bata94/northstar/metrics"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type Lifecycle int
@@ -59,6 +61,13 @@ type Pipeline struct {
 	postResolve  []Hook
 	preResponse  []Hook
 	postResponse []Hook
+	tracer       trace.Tracer
+}
+
+func (p *Pipeline) SetTracer(t trace.Tracer) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.tracer = t
 }
 
 func NewPipeline() *Pipeline {
@@ -105,17 +114,49 @@ func (p *Pipeline) Run(lifecycle Lifecycle, ctx *Context) error {
 	case PostResponse:
 		hooks = p.postResponse
 	}
+	tracer := p.tracer
 	p.mu.RUnlock()
 
 	for _, hook := range hooks {
 		if !hook.Enabled() {
 			continue
 		}
-		if err := hook.Handle(ctx); err != nil {
-			return err
+		if tracer != nil {
+			var span trace.Span
+			_, span = tracer.Start(ctx.Ctx, "dns.hook."+hook.Name(),
+				trace.WithAttributes(
+					attribute.Int("hook.priority", hook.Priority()),
+					attribute.String("hook.lifecycle", lifecycle.String()),
+				),
+			)
+			if err := hook.Handle(ctx); err != nil {
+				span.RecordError(err)
+				span.End()
+				return err
+			}
+			span.End()
+		} else {
+			if err := hook.Handle(ctx); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+func (l Lifecycle) String() string {
+	switch l {
+	case PreResolve:
+		return "pre_resolve"
+	case PostResolve:
+		return "post_resolve"
+	case PreResponse:
+		return "pre_response"
+	case PostResponse:
+		return "post_response"
+	default:
+		return "unknown"
+	}
 }
 
 func (p *Pipeline) Reset() {

@@ -29,6 +29,10 @@ func clearEnv() {
 		"NORTHSTAR_METRICS_ENABLE",
 		"NORTHSTAR_METRICS_PORT",
 		"NORTHSTAR_CONFIG",
+		"NORTHSTAR_TRACING_ENABLE",
+		"NORTHSTAR_TRACING_ENDPOINT",
+		"NORTHSTAR_TRACING_SERVICE_NAME",
+		"NORTHSTAR_TRACING_SAMPLE_RATE",
 	} {
 		_ = os.Unsetenv(key)
 	}
@@ -489,6 +493,106 @@ stale_age: 120
 	}
 	if cfg.StaleAge != 120 {
 		t.Errorf("StaleAge = %d, want 120", cfg.StaleAge)
+	}
+}
+
+func TestTracingDefaults(t *testing.T) {
+	clearEnv()
+	cfg := Load()
+	if cfg.Tracing.Enable {
+		t.Error("Tracing.Enable should be false by default")
+	}
+	if cfg.Tracing.Endpoint != "localhost:4317" {
+		t.Errorf("Tracing.Endpoint = %s, want localhost:4317", cfg.Tracing.Endpoint)
+	}
+	if cfg.Tracing.ServiceName != "northstar" {
+		t.Errorf("Tracing.ServiceName = %s, want northstar", cfg.Tracing.ServiceName)
+	}
+	if cfg.Tracing.SampleRate != 0.1 {
+		t.Errorf("Tracing.SampleRate = %f, want 0.1", cfg.Tracing.SampleRate)
+	}
+}
+
+func TestTracingEnvOverrides(t *testing.T) {
+	clearEnv()
+	_ = os.Setenv("NORTHSTAR_TRACING_ENABLE", "true")
+	_ = os.Setenv("NORTHSTAR_TRACING_ENDPOINT", "jaeger:4317")
+	_ = os.Setenv("NORTHSTAR_TRACING_SERVICE_NAME", "northstar-prod")
+	_ = os.Setenv("NORTHSTAR_TRACING_SAMPLE_RATE", "0.5")
+	defer clearEnv()
+
+	cfg := Load()
+	if !cfg.Tracing.Enable {
+		t.Error("Tracing.Enable should be true")
+	}
+	if cfg.Tracing.Endpoint != "jaeger:4317" {
+		t.Errorf("Tracing.Endpoint = %s, want jaeger:4317", cfg.Tracing.Endpoint)
+	}
+	if cfg.Tracing.ServiceName != "northstar-prod" {
+		t.Errorf("Tracing.ServiceName = %s, want northstar-prod", cfg.Tracing.ServiceName)
+	}
+	if cfg.Tracing.SampleRate != 0.5 {
+		t.Errorf("Tracing.SampleRate = %f, want 0.5", cfg.Tracing.SampleRate)
+	}
+}
+
+func TestTracingFileConfig(t *testing.T) {
+	clearEnv()
+	dir := t.TempDir()
+	cfgPath := dir + "/test.yaml"
+	_ = os.Setenv("NORTHSTAR_CONFIG", cfgPath)
+	defer clearEnv()
+
+	yamlContent := `
+tracing:
+  enable: true
+  endpoint: tempo:4317
+  service_name: northstar-test
+  sample_rate: 0.25
+`
+	if err := os.WriteFile(cfgPath, []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Load()
+	if !cfg.Tracing.Enable {
+		t.Error("Tracing.Enable should be true from file")
+	}
+	if cfg.Tracing.Endpoint != "tempo:4317" {
+		t.Errorf("Tracing.Endpoint = %s, want tempo:4317", cfg.Tracing.Endpoint)
+	}
+	if cfg.Tracing.ServiceName != "northstar-test" {
+		t.Errorf("Tracing.ServiceName = %s, want northstar-test", cfg.Tracing.ServiceName)
+	}
+	if cfg.Tracing.SampleRate != 0.25 {
+		t.Errorf("Tracing.SampleRate = %f, want 0.25", cfg.Tracing.SampleRate)
+	}
+}
+
+func TestTracingEnvOverridesFile(t *testing.T) {
+	clearEnv()
+	dir := t.TempDir()
+	cfgPath := dir + "/test.yaml"
+	_ = os.Setenv("NORTHSTAR_CONFIG", cfgPath)
+	defer clearEnv()
+
+	yamlContent := `
+tracing:
+  endpoint: tempo:4317
+  sample_rate: 0.25
+`
+	if err := os.WriteFile(cfgPath, []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = os.Setenv("NORTHSTAR_TRACING_ENDPOINT", "override:4317")
+
+	cfg := Load()
+	if cfg.Tracing.Endpoint != "override:4317" {
+		t.Errorf("Tracing.Endpoint = %s, want override:4317 (env > file)", cfg.Tracing.Endpoint)
+	}
+	if cfg.Tracing.SampleRate != 0.25 {
+		t.Errorf("Tracing.SampleRate = %f, want 0.25 (file > default)", cfg.Tracing.SampleRate)
 	}
 }
 

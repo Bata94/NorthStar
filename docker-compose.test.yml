@@ -1,0 +1,52 @@
+services:
+  northstar-node-a:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: prod
+    ports:
+      - "18053:53"
+      - "18053:53/udp"
+      - "19153:9153"
+    cap_add:
+      - NET_BIND_SERVICE
+    environment:
+      NORTHSTAR_MODE: prod
+      NORTHSTAR_METRICS_ENABLE: "true"
+      NORTHSTAR_METRICS_PORT: "9153"
+      NORTHSTAR_CACHE_ADDR: valkey:6379
+      NORTHSTAR_STALE_AGE: "300"
+      NORTHSTAR_NODE_NAME: node-a
+      NORTHSTAR_NODE_ID: node-a
+      NORTHSTAR_LOG_LEVEL: warn
+    depends_on:
+      - valkey
+
+  northstar-node-b:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: prod
+    ports:
+      - "18054:53"
+      - "18054:53/udp"
+      - "19154:9153"
+    cap_add:
+      - NET_BIND_SERVICE
+    environment:
+      NORTHSTAR_MODE: prod
+      NORTHSTAR_METRICS_ENABLE: "true"
+      NORTHSTAR_METRICS_PORT: "9153"
+      NORTHSTAR_CACHE_ADDR: valkey:6379
+      NORTHSTAR_STALE_AGE: "300"
+      NORTHSTAR_NODE_NAME: node-b
+      NORTHSTAR_NODE_ID: node-b
+      NORTHSTAR_LOG_LEVEL: warn
+    depends_on:
+      - valkey
+
+  valkey:
+    image: valkey/valkey:alpine
+    ports:
+      - "16379:6379"
+    restart: unless-stopped

@@ -25,6 +25,13 @@ test-all:
 test-blast:
 	go test -v -run 'TestBlast|Benchmark' -timeout=5m ./resolver/
 
+test-cross-node:
+	docker compose -f docker-compose.test.yml up -d --build && \
+	echo "Waiting for services to start..." && \
+	sleep 3 && \
+	go test -count=1 -tags=integration -run CrossNode ./resolver/ -v && \
+	docker compose -f docker-compose.test.yml down
+
 bench:
 	go test -bench=. -benchmem -benchtime=1x ./resolver/
 

@@ -24,6 +24,8 @@ import (
 	"github.com/bata94/northstar/metrics"
 	"github.com/bata94/northstar/upstream"
 	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var soReusePort = func() int {
@@ -232,6 +234,28 @@ func SetPipeline(p *hooks.Pipeline) {
 	pipelinePtr.Store(p)
 }
 
+type tracerHolder struct {
+	tracer trace.Tracer
+}
+
+var tracerPtr atomic.Pointer[tracerHolder]
+
+func SetTracer(t trace.Tracer) {
+	if t == nil {
+		tracerPtr.Store(nil)
+		return
+	}
+	tracerPtr.Store(&tracerHolder{tracer: t})
+}
+
+func getTracer() trace.Tracer {
+	h := tracerPtr.Load()
+	if h == nil {
+		return nil
+	}
+	return h.tracer
+}
+
 func clientEDNS(req *dns.Message) (size uint16, do bool, version uint8) {
 	for _, rr := range req.Additionals {
 		if rr.Type == dns.TypeOPT {
@@ -331,8 +355,10 @@ func writeTCPResponse(conn net.Conn, data []byte) error {
 }
 
 func processQuery(ctx context.Context, req *dns.Message, network, clientIP string, maxPayload uint16, do bool, version uint8, send func([]byte) error, group *upstream.Group, c cache.Cache, runtimeCfg *config.RuntimeConfig, m *metrics.Metrics) {
+	var spanRcode = -1
 	if version > 0 {
 		slog.Warn("Unsupported EDNS version", "version", version)
+		spanRcode = 16
 		resp := buildBADVERSPacket(req, maxPayload)
 		if err := send(resp); err != nil {
 			slog.Error("Error sending BADVERS", "error", err)
@@ -343,6 +369,7 @@ func processQuery(ctx context.Context, req *dns.Message, network, clientIP strin
 	q := req.Questions[0]
 	if q.Class != 1 {
 		slog.Warn("Non-IN class query refused", "class", q.Class, "domain", q.Name)
+		spanRcode = 5
 		sendRefused(req, send)
 		return
 	}
@@ -352,6 +379,25 @@ func processQuery(ctx context.Context, req *dns.Message, network, clientIP strin
 	if pipeline == nil {
 		slog.Error("Pipeline not initialized")
 		return
+	}
+
+	var span trace.Span
+	tr := getTracer()
+	if tr != nil {
+		ctx, span = tr.Start(ctx, "dns.query",
+			trace.WithAttributes(
+				attribute.String("dns.qname", q.Name),
+				attribute.Int("dns.qtype", int(q.Type)),
+				attribute.String("net.peer.ip", clientIP),
+				attribute.String("net.transport", network),
+			),
+		)
+		defer func() {
+			if span != nil {
+				span.SetAttributes(attribute.Int("dns.rcode", spanRcode))
+				span.End()
+			}
+		}()
 	}
 
 	hookCtx := &hooks.Context{
@@ -366,6 +412,7 @@ func processQuery(ctx context.Context, req *dns.Message, network, clientIP strin
 	}
 
 	if err := pipeline.Run(hooks.PreResolve, hookCtx); err != nil {
+		spanRcode = 0
 		return
 	}
 
@@ -373,6 +420,7 @@ func processQuery(ctx context.Context, req *dns.Message, network, clientIP strin
 	if err != nil {
 		slog.Error("Upstream error", "domain", q.Name, "type", q.Type, "error", err)
 		m.ErrorsTotal.With(prometheus.Labels{"type": "servfail"}).Inc()
+		spanRcode = 2
 		sendServfail(req, send)
 		return
 	}
@@ -398,6 +446,7 @@ func processQuery(ctx context.Context, req *dns.Message, network, clientIP strin
 
 	flags := req.Header.Flags & 0x7910
 	flags |= 0x8000 | 0x0080 | entry.RCode
+	spanRcode = int(entry.RCode)
 	if entry.AuthenticData {
 		flags |= 0x0020
 	}
@@ -601,6 +650,22 @@ func fetchFromUpstream(ctx context.Context, domain string, qtype uint16, maxPayl
 		m.UpstreamLatency.WithLabelValues(u.Name).Observe(time.Since(start).Seconds())
 	}()
 
+	if tr := getTracer(); tr != nil {
+		var span trace.Span
+		ctx, span = tr.Start(ctx, "dns.upstream_query",
+			trace.WithAttributes(
+				attribute.String("upstream.name", u.Name),
+				attribute.String("upstream.addr", u.Config.Address),
+				attribute.String("dns.qname", domain),
+				attribute.Int("dns.qtype", int(qtype)),
+			),
+		)
+		defer func() {
+			span.SetAttributes(attribute.Float64("upstream.latency_ms", float64(time.Since(start).Microseconds())/1000.0))
+			span.End()
+		}()
+	}
+
 	queryID := uint16(time.Now().UnixNano() & 0xFFFF)
 	optTTL := uint32(0)
 	if do {
@@ -801,10 +866,26 @@ func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.G
 	ttlMax := int(runtimeCfg.TTLMax.Load())
 	negativeTTL := int(runtimeCfg.NegativeTTL.Load())
 
+	var cacheDecision string
+	if tr := getTracer(); tr != nil {
+		var span trace.Span
+		ctx, span = tr.Start(ctx, "dns.resolve",
+			trace.WithAttributes(
+				attribute.String("dns.qname", domain),
+				attribute.Int("dns.qtype", int(qtype)),
+			),
+		)
+		defer func() {
+			span.SetAttributes(attribute.String("cache.decision", cacheDecision))
+			span.End()
+		}()
+	}
+
 	entry, found := c.Peek(ctx, domain, qtype)
 	if found {
 		if !entry.Expired() {
 			slog.Debug("Cache hit", "domain", domain, "type", qtype)
+			cacheDecision = "hit"
 			m.CacheHits.Inc()
 			if entry.RCode == 3 || (entry.RCode == 0 && len(entry.Answers) == 0) {
 				m.NegativeCacheHits.Inc()
@@ -815,6 +896,7 @@ func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.G
 		if staleAge := int(runtimeCfg.StaleAge.Load()); staleAge > 0 {
 			expiredFor := time.Since(entry.ExpiresAt)
 			if expiredFor < time.Duration(staleAge)*time.Second {
+				cacheDecision = "stale"
 				slog.Info("Serving stale entry, refreshing in background", "domain", domain, "type", qtype)
 				ikey := inflightKey{domain, qtype}
 				inflightMu.Lock()
@@ -851,6 +933,7 @@ func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.G
 	inflightMu.Lock()
 	if call, ok := inflightCalls[ikey]; ok {
 		inflightMu.Unlock()
+		cacheDecision = "inflight_wait"
 		slog.Debug("Waiting for in-flight fetch", "domain", domain, "type", qtype)
 		select {
 		case <-call.done:
@@ -885,6 +968,7 @@ func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.G
 	if err != nil {
 		slog.Error("Distributed lock error, falling back to direct fetch", "key", lockKey, "error", err)
 	} else if !locked {
+		cacheDecision = "cross_node_poll"
 		slog.Debug("Another node is fetching, polling cache", "domain", domain, "type", qtype)
 		pollStart := time.Now()
 		for time.Since(pollStart) < 5*time.Second {
@@ -896,6 +980,7 @@ func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.G
 			time.Sleep(50 * time.Millisecond)
 			if entry, found := c.Peek(ctx, domain, qtype); found && !entry.Expired() {
 				slog.Debug("Poll succeeded, another node cached the entry", "domain", domain, "type", qtype)
+				cacheDecision = "cross_node_hit"
 				m.CacheHits.Inc()
 				entry.RecordHit()
 				call.entry = entry
@@ -935,11 +1020,13 @@ func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.G
 		upstreamName = u.Name
 	} else {
 		entry, upstreamName, err = raceUpstreams(ctx, domain, qtype, maxPayload, network, selectedUpstreams, group, do, m, ttlMin, ttlMax, negativeTTL, ecsData)
+		cacheDecision = "race"
 		if err != nil {
 			call.err = err
 			return nil, "", err
 		}
 	}
+	cacheDecision = "miss"
 	if err := c.Set(ctx, entry); err != nil {
 		slog.Error("Cache set failed", "domain", domain, "type", qtype, "error", err)
 	}

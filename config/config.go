@@ -194,6 +194,13 @@ type TLSConfig struct {
 	AutoSelfSigned bool
 }
 
+type TracingConfig struct {
+	Enable      bool
+	Endpoint    string  // OTLP gRPC endpoint, default "localhost:4317"
+	ServiceName string  // default "northstar"
+	SampleRate  float64 // 0.0-1.0, default 0.1
+}
+
 type Config struct {
 	Mode                 string
 	NodeName             string
@@ -246,6 +253,7 @@ type Config struct {
 	ReusePort            bool
 	ReusePortWorkers     int
 	RateLimitFailClose   bool
+	Tracing              TracingConfig
 	Hooks                HookConfig
 }
 
@@ -306,8 +314,14 @@ func Load() Config {
 		ReusePort:            true,
 		ReusePortWorkers:     0,
 		RateLimitFailClose:   false,
-		Zones:                nil,
-		ACLs:                 nil,
+		Tracing: TracingConfig{
+			Enable:      false,
+			Endpoint:    "localhost:4317",
+			ServiceName: "northstar",
+			SampleRate:  0.1,
+		},
+		Zones: nil,
+		ACLs:  nil,
 		Hooks: HookConfig{
 			RateLimiting: RateLimitHookConfig{
 				Enabled:  false,
@@ -441,8 +455,14 @@ func Reload() (Config, error) {
 		ReusePort:            true,
 		ReusePortWorkers:     0,
 		RateLimitFailClose:   false,
-		Zones:                nil,
-		ACLs:                 nil,
+		Tracing: TracingConfig{
+			Enable:      false,
+			Endpoint:    "localhost:4317",
+			ServiceName: "northstar",
+			SampleRate:  0.1,
+		},
+		Zones: nil,
+		ACLs:  nil,
 		Hooks: HookConfig{
 			RateLimiting: RateLimitHookConfig{
 				Enabled:  false,
@@ -683,6 +703,20 @@ func applyEnvOverrides(cfg *Config) {
 	// ConfigPath override (not from file, directly via env)
 	if v, ok := os.LookupEnv("NORTHSTAR_CONFIG"); ok {
 		cfg.ConfigPath = v
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_TRACING_ENABLE"); ok {
+		cfg.Tracing.Enable = isTrue(v)
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_TRACING_ENDPOINT"); ok {
+		cfg.Tracing.Endpoint = v
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_TRACING_SERVICE_NAME"); ok {
+		cfg.Tracing.ServiceName = v
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_TRACING_SAMPLE_RATE"); ok {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.Tracing.SampleRate = f
+		}
 	}
 }
 

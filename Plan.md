@@ -400,18 +400,30 @@ feature-complete enough to audit meaningfully
 
 **Goal:** End-to-end distributed trace visibility for multi-node deployments.
 
-- [ ] Cross-node integration tests — docker-compose-based orchestration from within tests; verify distributed lock, cache stampede prevention, stale-while-revalidate, and rate-limit consistency across 2+ northstar instances sharing Valkey
-- [ ] OpenTelemetry integration
-  - Dependencies: `go.opentelemetry.io/otel`, SDK, OTLP exporter (gRPC/HTTP)
-  - Config: `tracing_enable`, `tracing_endpoint` (`localhost:4317`),
-    `tracing_service_name` (`northstar`), `tracing_sample_rate` (0.1)
-  - Spans at key points:
-    - `dns.query` — wraps `processQuery`; tags: client_ip, qname, qtype, rcode
-    - `dns.cache_lookup` — sub-span; tags: hit/miss, stale
-    - `dns.upstream_query` — sub-span; tags: upstream_name, latency_ms
-    - `dns.hook.<name>` — sub-span per hook execution; tags: lifecycle, hook_name
-  - Context propagation through hook `Context`
-  - OTLP exporter to OpenTelemetry Collector / Grafana Tempo / Jaeger
+### Sub-phase 13A — Cross-Node Integration Tests
+
+- [X] docker-compose.test.yml — 2 northstar instances + 1 Valkey, distinct ports, shared cache
+- [X] Test: distributed lock correctness (acquire/release across Valkey clients simulating 2 nodes)
+- [X] Test: cross-node cache stampede prevention (inflight lock held by one, collision detected by other)
+- [X] Test: cross-node stale-while-revalidate (stale lock held by one, rejected by other)
+- [X] Test: rate-limit counter consistency (shared INCR counter visible across clients)
+- [X] Test: cache flush propagation (flush from one client, miss on other)
+- [X] Test: cache coordination (set by one client, get by other)
+- [X] Test: DNS query through both running nodes (queries sent to both northstar instances via UDP)
+
+### Sub-phase 13B — OpenTelemetry Tracing
+
+- [X] Config: `tracing` block with `enable`, `endpoint` (`localhost:4317`), `service_name` (`northstar`), `sample_rate` (0.1); env vars `NORTHSTAR_TRACING_*`; YAML file support; defaults; env > file hierarchy
+- [X] `tracing/tracing.go` package — `Tracing` struct with OTLP gRPC exporter, batch span processor, configurable sampling, resource attributes (service name/instance/node), graceful shutdown
+- [X] Wiring in `main.go` — init tracer after metrics, `SetTracer()` on resolver and pipeline, graceful shutdown on exit
+- [X] Spans:
+  - `dns.query` — root span in `processQuery()`; attributes: qname, qtype, client_ip, network, rcode
+  - `dns.resolve` — sub-span in `resolve()`; attributes: qname, qtype, cache_decision (hit/stale/miss/inflight_wait/cross_node_poll/cross_node_hit/race)
+  - `dns.upstream_query` — sub-span in `fetchFromUpstream()`; attributes: upstream name, addr, latency_ms
+  - `dns.hook.<name>` — per-hook span in `pipeline.Run()`; attributes: hook priority, lifecycle
+- [X] Context propagation through hook `Context.Ctx` — span context flows through the hook pipeline
+- [X] Config tests: defaults, env overrides, file config, env > file hierarchy
+- [X] Tracing package tests: disabled (noop tracer), nil safety, invalid endpoint error handling
 
 **Depends on:** Phase 9 (observability foundation — metrics, logging),
 Phase 10 (multi-node deployment to benefit from tracing)
