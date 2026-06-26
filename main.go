@@ -168,13 +168,13 @@ func main() {
 	}
 	aclHook := hooks.NewAclHook(aclRuleset)
 
-	blockingHook, _ := buildHooksWithBlocking(&cfg, backend, m, authHook, aclHook)
-	resolver.SetPipeline(buildPipeline(&cfg, backend, m, authHook, aclHook, tracer.Tracer()))
-
-	runtimeCfg := config.NewRuntimeConfig(&cfg)
-
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	blockingHook, _ := buildHooksWithBlocking(ctx, &cfg, backend, m, authHook, aclHook)
+	resolver.SetPipeline(buildPipeline(ctx, &cfg, backend, m, authHook, aclHook, tracer.Tracer()))
+
+	runtimeCfg := config.NewRuntimeConfig(&cfg)
 
 	if cfg.PrefetchEnable {
 		resolver.StartCachePrefetch(ctx, backend, m, &cfg, runtimeCfg, upstreamGroup)
@@ -299,12 +299,12 @@ func main() {
 	slog.Warn("Goodbye.")
 }
 
-func buildPipeline(cfg *config.Config, c cache.Cache, m *metrics.Metrics, authHook *hooks.AuthoritativeHook, aclHook *hooks.AclHook, tr trace.Tracer) *hooks.Pipeline {
+func buildPipeline(ctx context.Context, cfg *config.Config, c cache.Cache, m *metrics.Metrics, authHook *hooks.AuthoritativeHook, aclHook *hooks.AclHook, tr trace.Tracer) *hooks.Pipeline {
 	p := hooks.NewPipeline()
 	if tr != nil {
 		p.SetTracer(tr)
 	}
-	_, hks := buildHooksWithBlocking(cfg, c, m, authHook, aclHook)
+	_, hks := buildHooksWithBlocking(ctx, cfg, c, m, authHook, aclHook)
 	for _, h := range hks {
 		p.Register(h)
 	}
@@ -348,11 +348,11 @@ func reloadConfig(runtimeCfg *config.RuntimeConfig, upstreamGroup *upstream.Grou
 		}
 		slog.SetDefault(log.New(newLogLevel, newLogMode, newCfg.LogDir, newCfg.LogRetention))
 	}
-	resolver.SetPipeline(buildPipeline(&newCfg, c, m, authHook, aclHook, tracer.Tracer()))
+	resolver.SetPipeline(buildPipeline(context.Background(), &newCfg, c, m, authHook, aclHook, tracer.Tracer()))
 	slog.Warn("Config reloaded")
 }
 
-func buildHooksWithBlocking(cfg *config.Config, c cache.Cache, m *metrics.Metrics, authHook *hooks.AuthoritativeHook, aclHook *hooks.AclHook) (*hooks.BlockingHook, []hooks.Hook) {
+func buildHooksWithBlocking(ctx context.Context, cfg *config.Config, c cache.Cache, m *metrics.Metrics, authHook *hooks.AuthoritativeHook, aclHook *hooks.AclHook) (*hooks.BlockingHook, []hooks.Hook) {
 	var result []hooks.Hook
 	var blockHook *hooks.BlockingHook
 
@@ -391,24 +391,34 @@ func buildHooksWithBlocking(cfg *config.Config, c cache.Cache, m *metrics.Metric
 			rpzConfigs[i] = struct{ Path, Action string }{r.Path, r.Action}
 		}
 		hook, err := hooks.NewBlockingHook(struct {
-			Enabled      bool
-			Priority     int
-			BlockAction  string
-			SinkholeAddr string
-			Blocklists   []string
-			Allowlists   []string
-			DomainRPS    int
-			RPZ          []struct{ Path, Action string }
+			Enabled         bool
+			Priority        int
+			BlockAction     string
+			SinkholeAddr    string
+			Blocklists      []string
+			Allowlists      []string
+			BlocklistURLs   []config.BlocklistURLConfig
+			DomainRPS       int
+			RPZ             []struct{ Path, Action string }
+			StatsEnabled    bool
+			StatsMaxDomains int
+			StatsMaxClients int
+			StatsRetention  int
 		}{
-			Enabled:      blockCfg.Enabled,
-			Priority:     blockCfg.Priority,
-			BlockAction:  blockCfg.BlockAction,
-			SinkholeAddr: blockCfg.SinkholeAddr,
-			Blocklists:   blockCfg.Blocklists,
-			Allowlists:   blockCfg.Allowlists,
-			DomainRPS:    blockCfg.DomainRPS,
-			RPZ:          rpzConfigs,
-		}, m)
+			Enabled:         blockCfg.Enabled,
+			Priority:        blockCfg.Priority,
+			BlockAction:     blockCfg.BlockAction,
+			SinkholeAddr:    blockCfg.SinkholeAddr,
+			Blocklists:      blockCfg.Blocklists,
+			Allowlists:      blockCfg.Allowlists,
+			BlocklistURLs:   blockCfg.BlocklistURLs,
+			DomainRPS:       blockCfg.DomainRPS,
+			RPZ:             rpzConfigs,
+			StatsEnabled:    blockCfg.StatsEnabled,
+			StatsMaxDomains: blockCfg.StatsMaxDomains,
+			StatsMaxClients: blockCfg.StatsMaxClients,
+			StatsRetention:  blockCfg.StatsRetention,
+		}, m, ctx)
 		if err != nil {
 			slog.Error("Failed to create blocking hook", "error", err)
 		} else {

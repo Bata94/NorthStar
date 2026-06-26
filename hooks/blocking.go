@@ -1,41 +1,60 @@
 package hooks
 
 import (
+	"context"
 	"log/slog"
 	"net"
 	"strconv"
 	"time"
 
+	"github.com/bata94/northstar/config"
 	"github.com/bata94/northstar/dns"
 	"github.com/bata94/northstar/filter"
 	"github.com/bata94/northstar/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+type blockSource string
+
+const (
+	sourceBlocklist  blockSource = "blocklist"
+	sourceRPZ        blockSource = "rpz"
+	sourceDomainRate blockSource = "domain_rate"
+)
+
 type BlockingHook struct {
-	priority   int
-	enabled    bool
-	filter     *filter.Filter
-	rpz        *filter.RPZSet
-	action     string
-	sinkholeIP net.IP
-	domainRPS  int
-	metrics    *metrics.Metrics
-	blocklists []string
-	allowlists []string
-	rpzConfigs []struct{ Path, Action string }
+	priority      int
+	enabled       bool
+	filter        *filter.Filter
+	rpz           *filter.RPZSet
+	action        string
+	sinkholeIP    net.IP
+	domainRPS     int
+	metrics       *metrics.Metrics
+	blocklists    []string
+	allowlists    []string
+	rpzConfigs    []struct{ Path, Action string }
+	urlSources    []*filter.URLSource
+	blocklistURLs []config.BlocklistURLConfig
+	stats         *filter.BlockingStats
+	statsEnabled  bool
 }
 
 func NewBlockingHook(cfg struct {
-	Enabled      bool
-	Priority     int
-	BlockAction  string
-	SinkholeAddr string
-	Blocklists   []string
-	Allowlists   []string
-	DomainRPS    int
-	RPZ          []struct{ Path, Action string }
-}, m *metrics.Metrics) (*BlockingHook, error) {
+	Enabled         bool
+	Priority        int
+	BlockAction     string
+	SinkholeAddr    string
+	Blocklists      []string
+	Allowlists      []string
+	BlocklistURLs   []config.BlocklistURLConfig
+	DomainRPS       int
+	RPZ             []struct{ Path, Action string }
+	StatsEnabled    bool
+	StatsMaxDomains int
+	StatsMaxClients int
+	StatsRetention  int
+}, m *metrics.Metrics, ctx context.Context) (*BlockingHook, error) {
 	f, err := filter.NewFilter(cfg.Blocklists, cfg.Allowlists)
 	if err != nil {
 		return nil, err
@@ -59,19 +78,39 @@ func NewBlockingHook(cfg struct {
 		}
 	}
 
-	return &BlockingHook{
-		priority:   cfg.Priority,
-		enabled:    cfg.Enabled,
-		filter:     f,
-		rpz:        rpzSet,
-		action:     action,
-		sinkholeIP: sinkIP,
-		domainRPS:  cfg.DomainRPS,
-		metrics:    m,
-		blocklists: cfg.Blocklists,
-		allowlists: cfg.Allowlists,
-		rpzConfigs: cfg.RPZ,
-	}, nil
+	var stats *filter.BlockingStats
+	if cfg.StatsEnabled {
+		stats = filter.NewBlockingStats(cfg.StatsMaxDomains, cfg.StatsMaxClients, cfg.StatsRetention)
+	}
+
+	h := &BlockingHook{
+		priority:      cfg.Priority,
+		enabled:       cfg.Enabled,
+		filter:        f,
+		rpz:           rpzSet,
+		action:        action,
+		sinkholeIP:    sinkIP,
+		domainRPS:     cfg.DomainRPS,
+		metrics:       m,
+		blocklists:    cfg.Blocklists,
+		allowlists:    cfg.Allowlists,
+		rpzConfigs:    cfg.RPZ,
+		blocklistURLs: cfg.BlocklistURLs,
+		stats:         stats,
+		statsEnabled:  cfg.StatsEnabled,
+	}
+
+	for _, u := range cfg.BlocklistURLs {
+		s := filter.NewURLSource(u.URL, u.RefreshInterval, "/tmp/northstar/blocklist-cache")
+		h.urlSources = append(h.urlSources, s)
+		s.Start(ctx, func() {
+			if err := h.ReloadFilter(); err != nil {
+				slog.Error("Failed to reload filter after URL source update", "url", u.URL, "error", err)
+			}
+		})
+	}
+
+	return h, nil
 }
 
 func (h *BlockingHook) Filter() *filter.Filter                      { return h.filter }
@@ -80,8 +119,18 @@ func (h *BlockingHook) Blocklists() []string                        { return h.b
 func (h *BlockingHook) Allowlists() []string                        { return h.allowlists }
 func (h *BlockingHook) RPZConfigs() []struct{ Path, Action string } { return h.rpzConfigs }
 func (h *BlockingHook) BlockAction() string                         { return h.action }
+func (h *BlockingHook) Stats() *filter.BlockingStats                { return h.stats }
+func (h *BlockingHook) StatsEnabled() bool                          { return h.statsEnabled }
+func (h *BlockingHook) BlocklistURLs() []config.BlocklistURLConfig  { return h.blocklistURLs }
+
 func (h *BlockingHook) ReloadFilter() error {
-	f, err := filter.NewFilter(h.blocklists, h.allowlists)
+	paths := make([]string, len(h.blocklists))
+	copy(paths, h.blocklists)
+	for _, s := range h.urlSources {
+		paths = append(paths, s.LocalPath())
+	}
+
+	f, err := filter.NewFilter(paths, h.allowlists)
 	if err != nil {
 		return err
 	}
@@ -113,12 +162,16 @@ func (h *BlockingHook) Handle(ctx *Context) error {
 	domain := q.Name
 	domain = trimTrailingDot(domain)
 
-	action := h.checkBlocked(domain, ctx)
+	if h.statsEnabled && h.stats != nil {
+		h.stats.RecordQuery(ctx.ClientIP)
+	}
+
+	action, source := h.checkBlocked(domain, ctx)
 	if action == "" {
 		return nil
 	}
 
-	slog.Warn("Query blocked", "domain", domain, "action", action, "client", ctx.ClientIP)
+	slog.Warn("Query blocked", "domain", domain, "action", action, "source", source, "client", ctx.ClientIP)
 
 	maxPayload := extractMaxPayload(ctx.Request)
 
@@ -129,17 +182,28 @@ func (h *BlockingHook) Handle(ctx *Context) error {
 		"qtype":  strconv.Itoa(int(q.Type)),
 	}).Inc()
 
+	if source != "" {
+		h.metrics.BlockedBySourceTotal.With(prometheus.Labels{
+			"source": string(source),
+			"action": action,
+		}).Inc()
+	}
+
+	if h.statsEnabled && h.stats != nil {
+		h.stats.RecordBlock(domain, ctx.ClientIP)
+	}
+
 	return ErrBlocked
 }
 
-func (h *BlockingHook) checkBlocked(domain string, ctx *Context) string {
+func (h *BlockingHook) checkBlocked(domain string, ctx *Context) (string, blockSource) {
 	if h.filter != nil && h.filter.IsBlocked(domain) {
-		return h.action
+		return h.action, sourceBlocklist
 	}
 
 	if h.rpz != nil {
 		if rpzAction, ok := h.rpz.Match(domain); ok {
-			return rpzAction
+			return rpzAction, sourceRPZ
 		}
 	}
 
@@ -147,11 +211,17 @@ func (h *BlockingHook) checkBlocked(domain string, ctx *Context) string {
 		key := "northstar:domainrate:" + domain + ":" + strconv.FormatInt(time.Now().Unix(), 10)
 		val, err := ctx.Cache.Incr(ctx.Ctx, key, time.Second)
 		if err == nil && val > int64(h.domainRPS) {
-			return h.action
+			return h.action, sourceDomainRate
 		}
 	}
 
-	return ""
+	return "", ""
+}
+
+func (h *BlockingHook) Close() {
+	for _, s := range h.urlSources {
+		s.Close()
+	}
 }
 
 func trimTrailingDot(s string) string {

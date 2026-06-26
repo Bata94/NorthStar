@@ -27,6 +27,8 @@ type Metrics struct {
 	UpstreamQueries         *prometheus.CounterVec
 	UpstreamConditionalHits *prometheus.CounterVec
 	BlockedTotal            *prometheus.CounterVec
+	BlockedBySourceTotal    *prometheus.CounterVec
+	AllowlistHitsTotal      prometheus.Counter
 	DnssecValidationStatus  *prometheus.CounterVec
 	Dns64SynthesesTotal     prometheus.Counter
 	EcsQueriesTotal         *prometheus.CounterVec
@@ -167,6 +169,22 @@ func New() *Metrics {
 		Help:      "Total queries blocked by action and qtype.",
 	}, []string{"action", "qtype"})
 	reg.MustRegister(m.BlockedTotal)
+
+	m.BlockedBySourceTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "northstar",
+		Subsystem: "filter",
+		Name:      "blocked_by_source_total",
+		Help:      "Total queries blocked by blocking source (blocklist, rpz, domain_rate) and action.",
+	}, []string{"source", "action"})
+	reg.MustRegister(m.BlockedBySourceTotal)
+
+	m.AllowlistHitsTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "northstar",
+		Subsystem: "filter",
+		Name:      "allowlist_hits_total",
+		Help:      "Total allowlist matches (domains explicitly allowed).",
+	})
+	reg.MustRegister(m.AllowlistHitsTotal)
 
 	m.DnssecValidationStatus = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: "northstar",

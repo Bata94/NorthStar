@@ -30,15 +30,25 @@ type RPZConfig struct {
 	Action string // nxdomain, sinkhole, passthru, drop
 }
 
+type BlocklistURLConfig struct {
+	URL             string
+	RefreshInterval int // minutes, default 1440 (24h)
+}
+
 type BlockingHookConfig struct {
-	Enabled      bool
-	Priority     int
-	BlockAction  string   // nxdomain, sinkhole, refused, drop
-	SinkholeAddr string   // default "127.0.0.1"
-	Blocklists   []string // file paths
-	Allowlists   []string // file paths
-	DomainRPS    int      // per-domain rate limit (0 = disabled)
-	RPZ          []RPZConfig
+	Enabled         bool
+	Priority        int
+	BlockAction     string   // nxdomain, sinkhole, refused, drop
+	SinkholeAddr    string   // default "127.0.0.1"
+	Blocklists      []string // file paths
+	Allowlists      []string // file paths
+	BlocklistURLs   []BlocklistURLConfig
+	DomainRPS       int // per-domain rate limit (0 = disabled)
+	RPZ             []RPZConfig
+	StatsEnabled    bool // default true
+	StatsMaxDomains int  // default 1000
+	StatsMaxClients int  // default 1000
+	StatsRetention  int  // days, default 30
 }
 
 type HookConfig struct {
@@ -342,11 +352,15 @@ func Load() Config {
 				Action:   "servfail",
 			},
 			Blocking: BlockingHookConfig{
-				Enabled:      false,
-				Priority:     200,
-				BlockAction:  "nxdomain",
-				SinkholeAddr: "127.0.0.1",
-				DomainRPS:    0,
+				Enabled:         false,
+				Priority:        200,
+				BlockAction:     "nxdomain",
+				SinkholeAddr:    "127.0.0.1",
+				DomainRPS:       0,
+				StatsEnabled:    true,
+				StatsMaxDomains: 1000,
+				StatsMaxClients: 1000,
+				StatsRetention:  30,
 			},
 			QMinimizer: QMinimizerHookConfig{
 				Enabled:    false,
@@ -489,11 +503,15 @@ func Reload() (Config, error) {
 				Action:   "servfail",
 			},
 			Blocking: BlockingHookConfig{
-				Enabled:      false,
-				Priority:     200,
-				BlockAction:  "nxdomain",
-				SinkholeAddr: "127.0.0.1",
-				DomainRPS:    0,
+				Enabled:         false,
+				Priority:        200,
+				BlockAction:     "nxdomain",
+				SinkholeAddr:    "127.0.0.1",
+				DomainRPS:       0,
+				StatsEnabled:    true,
+				StatsMaxDomains: 1000,
+				StatsMaxClients: 1000,
+				StatsRetention:  30,
 			},
 			QMinimizer: QMinimizerHookConfig{
 				Enabled:    false,

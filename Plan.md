@@ -65,9 +65,9 @@
   Pi-hole list formats
 - [X] Per-domain rate limiting — limit queries to specific domains (e.g.,
   high-cardinality subdomains used in DDoS amplification)
-- [ ] URL-based blocklist sources — auto-download blocklists from URLs
+- [X] URL-based blocklist sources — auto-download blocklists from URLs
   with periodic refresh and caching
-- [ ] Ad blocking analytics / reporting — top blocked domains, top
+- [X] Ad blocking analytics / reporting — top blocked domains, top
   blocked clients, blocked-vs-allowed ratios
 
 ## Low RAM Mode
@@ -489,10 +489,10 @@ Phase 10 (multi-node deployment to benefit from tracing)
 
 **Goal:** Modern blocklist management with remote sources and analytics.
 
-- [ ] URL-based blocklist sources — auto-download blocklists from URLs
+- [X] URL-based blocklist sources — auto-download blocklists from URLs
   with periodic refresh (configurable interval), local caching of
   downloaded files, and atomic swap on update
-- [ ] Ad blocking analytics / reporting — top blocked domains, top
+- [X] Ad blocking analytics / reporting — top blocked domains, top
   blocked clients, blocked-vs-allowed ratios, daily trend data
   exposed via API
 

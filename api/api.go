@@ -123,6 +123,12 @@ func (s *Server) Serve(ctx context.Context) error {
 	mux.HandleFunc("PUT /api/v1/acls/{name}", s.auth(s.handleACLUpdate))
 	mux.HandleFunc("DELETE /api/v1/acls/{name}", s.auth(s.handleACLDelete))
 
+	mux.HandleFunc("GET /api/v1/filter/analytics", s.auth(s.handleAnalytics))
+	mux.HandleFunc("GET /api/v1/filter/analytics/blocked-domains", s.auth(s.handleAnalyticsBlockedDomains))
+	mux.HandleFunc("GET /api/v1/filter/analytics/blocked-clients", s.auth(s.handleAnalyticsBlockedClients))
+	mux.HandleFunc("GET /api/v1/filter/analytics/daily-trend", s.auth(s.handleAnalyticsDailyTrend))
+	mux.HandleFunc("DELETE /api/v1/filter/analytics", s.auth(s.handleAnalyticsReset))
+
 	mux.HandleFunc("POST /api/v1/reload", s.auth(s.handleReload))
 
 	addr := fmt.Sprintf(":%d", s.cfg.APIPort)

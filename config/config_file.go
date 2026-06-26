@@ -15,15 +15,25 @@ type FileRPZConfig struct {
 	Action *string `yaml:"action"`
 }
 
+type FileBlocklistURLConfig struct {
+	URL             *string `yaml:"url"`
+	RefreshInterval *int    `yaml:"refresh_interval"`
+}
+
 type FileBlockingHookConfig struct {
-	Enabled      *bool           `yaml:"enabled"`
-	Priority     *int            `yaml:"priority"`
-	BlockAction  *string         `yaml:"block_action"`
-	SinkholeAddr *string         `yaml:"sinkhole_addr"`
-	Blocklists   []string        `yaml:"blocklists"`
-	Allowlists   []string        `yaml:"allowlists"`
-	DomainRPS    *int            `yaml:"domain_rps"`
-	RPZ          []FileRPZConfig `yaml:"rpz"`
+	Enabled         *bool                    `yaml:"enabled"`
+	Priority        *int                     `yaml:"priority"`
+	BlockAction     *string                  `yaml:"block_action"`
+	SinkholeAddr    *string                  `yaml:"sinkhole_addr"`
+	Blocklists      []string                 `yaml:"blocklists"`
+	Allowlists      []string                 `yaml:"allowlists"`
+	BlocklistURLs   []FileBlocklistURLConfig `yaml:"blocklist_urls"`
+	DomainRPS       *int                     `yaml:"domain_rps"`
+	RPZ             []FileRPZConfig          `yaml:"rpz"`
+	StatsEnabled    *bool                    `yaml:"stats_enabled"`
+	StatsMaxDomains *int                     `yaml:"stats_max_domains"`
+	StatsMaxClients *int                     `yaml:"stats_max_clients"`
+	StatsRetention  *int                     `yaml:"stats_retention"`
 }
 
 type FileTLSConfig struct {
@@ -572,6 +582,29 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 					}
 				}
 			}
+			if len(fc.Hooks.Blocking.BlocklistURLs) > 0 {
+				cfg.Hooks.Blocking.BlocklistURLs = make([]BlocklistURLConfig, len(fc.Hooks.Blocking.BlocklistURLs))
+				for i, u := range fc.Hooks.Blocking.BlocklistURLs {
+					if u.URL != nil {
+						cfg.Hooks.Blocking.BlocklistURLs[i].URL = *u.URL
+					}
+					if u.RefreshInterval != nil {
+						cfg.Hooks.Blocking.BlocklistURLs[i].RefreshInterval = *u.RefreshInterval
+					}
+				}
+			}
+			if fc.Hooks.Blocking.StatsEnabled != nil {
+				cfg.Hooks.Blocking.StatsEnabled = *fc.Hooks.Blocking.StatsEnabled
+			}
+			if fc.Hooks.Blocking.StatsMaxDomains != nil {
+				cfg.Hooks.Blocking.StatsMaxDomains = *fc.Hooks.Blocking.StatsMaxDomains
+			}
+			if fc.Hooks.Blocking.StatsMaxClients != nil {
+				cfg.Hooks.Blocking.StatsMaxClients = *fc.Hooks.Blocking.StatsMaxClients
+			}
+			if fc.Hooks.Blocking.StatsRetention != nil {
+				cfg.Hooks.Blocking.StatsRetention = *fc.Hooks.Blocking.StatsRetention
+			}
 		}
 		if fc.Hooks.AnyQuery != nil {
 			if fc.Hooks.AnyQuery.Enabled != nil {
@@ -778,6 +811,10 @@ func configToFile(cfg *Config) *FileConfig {
 	blockingLists := cfg.Hooks.Blocking.Blocklists
 	blockingAllowlists := cfg.Hooks.Blocking.Allowlists
 	blockingDomainRPS := cfg.Hooks.Blocking.DomainRPS
+	blockingStatsEnabled := cfg.Hooks.Blocking.StatsEnabled
+	blockingStatsMaxDomains := cfg.Hooks.Blocking.StatsMaxDomains
+	blockingStatsMaxClients := cfg.Hooks.Blocking.StatsMaxClients
+	blockingStatsRetention := cfg.Hooks.Blocking.StatsRetention
 
 	qminEnabled := cfg.Hooks.QMinimizer.Enabled
 	qminPriority := cfg.Hooks.QMinimizer.Priority
@@ -844,6 +881,16 @@ func configToFile(cfg *Config) *FileConfig {
 		fileRPZ = append(fileRPZ, FileRPZConfig{
 			Path:   &path,
 			Action: &action,
+		})
+	}
+
+	var fileBlocklistURLs []FileBlocklistURLConfig
+	for _, u := range cfg.Hooks.Blocking.BlocklistURLs {
+		url := u.URL
+		interval := u.RefreshInterval
+		fileBlocklistURLs = append(fileBlocklistURLs, FileBlocklistURLConfig{
+			URL:             &url,
+			RefreshInterval: &interval,
 		})
 	}
 
@@ -978,14 +1025,19 @@ func configToFile(cfg *Config) *FileConfig {
 				Action:   &hookAction,
 			},
 			Blocking: &FileBlockingHookConfig{
-				Enabled:      &blockingEnabled,
-				Priority:     &blockingPriority,
-				BlockAction:  &blockingAction,
-				SinkholeAddr: &blockingSinkhole,
-				Blocklists:   blockingLists,
-				Allowlists:   blockingAllowlists,
-				DomainRPS:    &blockingDomainRPS,
-				RPZ:          fileRPZ,
+				Enabled:         &blockingEnabled,
+				Priority:        &blockingPriority,
+				BlockAction:     &blockingAction,
+				SinkholeAddr:    &blockingSinkhole,
+				Blocklists:      blockingLists,
+				Allowlists:      blockingAllowlists,
+				BlocklistURLs:   fileBlocklistURLs,
+				DomainRPS:       &blockingDomainRPS,
+				RPZ:             fileRPZ,
+				StatsEnabled:    &blockingStatsEnabled,
+				StatsMaxDomains: &blockingStatsMaxDomains,
+				StatsMaxClients: &blockingStatsMaxClients,
+				StatsRetention:  &blockingStatsRetention,
 			},
 			QMinimizer: &FileQMinimizerHookConfig{
 				Enabled:    &qminEnabled,
@@ -1212,6 +1264,10 @@ func WriteDefaultConfig(path string) error {
 	blockingAction := "nxdomain"
 	blockingSinkhole := "127.0.0.1"
 	blockingDomainRPS := 0
+	blockingStatsEnabled := true
+	blockingStatsMaxDomains := 1000
+	blockingStatsMaxClients := 1000
+	blockingStatsRetention := 30
 	qminEnabled := false
 	qminPriority := 300
 	qminKeepLabels := 2
@@ -1336,11 +1392,15 @@ func WriteDefaultConfig(path string) error {
 				Action:   &hookAction,
 			},
 			Blocking: &FileBlockingHookConfig{
-				Enabled:      &blockingEnabled,
-				Priority:     &blockingPriority,
-				BlockAction:  &blockingAction,
-				SinkholeAddr: &blockingSinkhole,
-				DomainRPS:    &blockingDomainRPS,
+				Enabled:         &blockingEnabled,
+				Priority:        &blockingPriority,
+				BlockAction:     &blockingAction,
+				SinkholeAddr:    &blockingSinkhole,
+				DomainRPS:       &blockingDomainRPS,
+				StatsEnabled:    &blockingStatsEnabled,
+				StatsMaxDomains: &blockingStatsMaxDomains,
+				StatsMaxClients: &blockingStatsMaxClients,
+				StatsRetention:  &blockingStatsRetention,
 			},
 			QMinimizer: &FileQMinimizerHookConfig{
 				Enabled:    &qminEnabled,

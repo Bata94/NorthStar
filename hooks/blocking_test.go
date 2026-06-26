@@ -7,9 +7,49 @@ import (
 	"testing"
 
 	"github.com/bata94/northstar/cache"
+	"github.com/bata94/northstar/config"
 	"github.com/bata94/northstar/dns"
 	"github.com/bata94/northstar/metrics"
 )
+
+func testBlockingCfg() struct {
+	Enabled         bool
+	Priority        int
+	BlockAction     string
+	SinkholeAddr    string
+	Blocklists      []string
+	Allowlists      []string
+	BlocklistURLs   []config.BlocklistURLConfig
+	DomainRPS       int
+	RPZ             []struct{ Path, Action string }
+	StatsEnabled    bool
+	StatsMaxDomains int
+	StatsMaxClients int
+	StatsRetention  int
+} {
+	return struct {
+		Enabled         bool
+		Priority        int
+		BlockAction     string
+		SinkholeAddr    string
+		Blocklists      []string
+		Allowlists      []string
+		BlocklistURLs   []config.BlocklistURLConfig
+		DomainRPS       int
+		RPZ             []struct{ Path, Action string }
+		StatsEnabled    bool
+		StatsMaxDomains int
+		StatsMaxClients int
+		StatsRetention  int
+	}{
+		Priority:        200,
+		SinkholeAddr:    "127.0.0.1",
+		StatsEnabled:    false,
+		StatsMaxDomains: 1000,
+		StatsMaxClients: 1000,
+		StatsRetention:  30,
+	}
+}
 
 func writeTestList(t *testing.T, content string) string {
 	t.Helper()
@@ -28,22 +68,11 @@ func TestBlockingHookBlocksDomain(t *testing.T) {
 	mem := cache.NewMemory(0, nil)
 	defer mem.Close()
 
-	hook, err := NewBlockingHook(struct {
-		Enabled      bool
-		Priority     int
-		BlockAction  string
-		SinkholeAddr string
-		Blocklists   []string
-		Allowlists   []string
-		DomainRPS    int
-		RPZ          []struct{ Path, Action string }
-	}{
-		Enabled:      true,
-		Priority:     200,
-		BlockAction:  "nxdomain",
-		SinkholeAddr: "127.0.0.1",
-		Blocklists:   []string{blockPath},
-	}, m)
+	cfg := testBlockingCfg()
+	cfg.Enabled = true
+	cfg.BlockAction = "nxdomain"
+	cfg.Blocklists = []string{blockPath}
+	hook, err := NewBlockingHook(cfg, m, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,22 +110,12 @@ func TestBlockingHookAllowlist(t *testing.T) {
 	mem := cache.NewMemory(0, nil)
 	defer mem.Close()
 
-	hook, err := NewBlockingHook(struct {
-		Enabled      bool
-		Priority     int
-		BlockAction  string
-		SinkholeAddr string
-		Blocklists   []string
-		Allowlists   []string
-		DomainRPS    int
-		RPZ          []struct{ Path, Action string }
-	}{
-		Enabled:     true,
-		Priority:    200,
-		BlockAction: "nxdomain",
-		Blocklists:  []string{blockPath},
-		Allowlists:  []string{allowPath},
-	}, m)
+	cfg := testBlockingCfg()
+	cfg.Enabled = true
+	cfg.BlockAction = "nxdomain"
+	cfg.Blocklists = []string{blockPath}
+	cfg.Allowlists = []string{allowPath}
+	hook, err := NewBlockingHook(cfg, m, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,22 +145,12 @@ func TestBlockingHookSinkhole(t *testing.T) {
 	mem := cache.NewMemory(0, nil)
 	defer mem.Close()
 
-	hook, err := NewBlockingHook(struct {
-		Enabled      bool
-		Priority     int
-		BlockAction  string
-		SinkholeAddr string
-		Blocklists   []string
-		Allowlists   []string
-		DomainRPS    int
-		RPZ          []struct{ Path, Action string }
-	}{
-		Enabled:      true,
-		Priority:     200,
-		BlockAction:  "sinkhole",
-		SinkholeAddr: "127.0.0.1",
-		Blocklists:   []string{blockPath},
-	}, m)
+	cfg := testBlockingCfg()
+	cfg.Enabled = true
+	cfg.BlockAction = "sinkhole"
+	cfg.SinkholeAddr = "127.0.0.1"
+	cfg.Blocklists = []string{blockPath}
+	hook, err := NewBlockingHook(cfg, m, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,21 +199,11 @@ func TestBlockingHookDrop(t *testing.T) {
 	mem := cache.NewMemory(0, nil)
 	defer mem.Close()
 
-	hook, err := NewBlockingHook(struct {
-		Enabled      bool
-		Priority     int
-		BlockAction  string
-		SinkholeAddr string
-		Blocklists   []string
-		Allowlists   []string
-		DomainRPS    int
-		RPZ          []struct{ Path, Action string }
-	}{
-		Enabled:     true,
-		Priority:    200,
-		BlockAction: "drop",
-		Blocklists:  []string{blockPath},
-	}, m)
+	cfg := testBlockingCfg()
+	cfg.Enabled = true
+	cfg.BlockAction = "drop"
+	cfg.Blocklists = []string{blockPath}
+	hook, err := NewBlockingHook(cfg, m, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,21 +240,11 @@ func TestBlockingHookNotBlocked(t *testing.T) {
 	mem := cache.NewMemory(0, nil)
 	defer mem.Close()
 
-	hook, err := NewBlockingHook(struct {
-		Enabled      bool
-		Priority     int
-		BlockAction  string
-		SinkholeAddr string
-		Blocklists   []string
-		Allowlists   []string
-		DomainRPS    int
-		RPZ          []struct{ Path, Action string }
-	}{
-		Enabled:     true,
-		Priority:    200,
-		BlockAction: "nxdomain",
-		Blocklists:  []string{blockPath},
-	}, m)
+	cfg := testBlockingCfg()
+	cfg.Enabled = true
+	cfg.BlockAction = "nxdomain"
+	cfg.Blocklists = []string{blockPath}
+	hook, err := NewBlockingHook(cfg, m, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,18 +270,9 @@ func TestBlockingHookNotBlocked(t *testing.T) {
 func TestBlockingHookDisabled(t *testing.T) {
 	m := metrics.New()
 
-	hook, err := NewBlockingHook(struct {
-		Enabled      bool
-		Priority     int
-		BlockAction  string
-		SinkholeAddr string
-		Blocklists   []string
-		Allowlists   []string
-		DomainRPS    int
-		RPZ          []struct{ Path, Action string }
-	}{
-		Enabled: false,
-	}, m)
+	cfg := testBlockingCfg()
+	cfg.Enabled = false
+	hook, err := NewBlockingHook(cfg, m, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,21 +288,11 @@ func TestBlockingHookRefused(t *testing.T) {
 	mem := cache.NewMemory(0, nil)
 	defer mem.Close()
 
-	hook, err := NewBlockingHook(struct {
-		Enabled      bool
-		Priority     int
-		BlockAction  string
-		SinkholeAddr string
-		Blocklists   []string
-		Allowlists   []string
-		DomainRPS    int
-		RPZ          []struct{ Path, Action string }
-	}{
-		Enabled:     true,
-		Priority:    200,
-		BlockAction: "refused",
-		Blocklists:  []string{blockPath},
-	}, m)
+	cfg := testBlockingCfg()
+	cfg.Enabled = true
+	cfg.BlockAction = "refused"
+	cfg.Blocklists = []string{blockPath}
+	hook, err := NewBlockingHook(cfg, m, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
