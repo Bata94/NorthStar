@@ -504,15 +504,15 @@ Phase 10 (multi-node deployment to benefit from tracing)
 
 **Goal:** Sophisticated rate limiting and network-level policy enforcement.
 
-- [ ] Response Rate Limiting (RRL) — limit identical responses to the
+- [X] Response Rate Limiting (RRL) — limit identical responses to the
   same client to prevent DNS amplification attacks (separate from
   existing query rate limiting)
-- [ ] Token bucket rate limiting — burst support with configurable
+- [X] Token bucket rate limiting — burst support with configurable
   rate and burst size (replaces current fixed-window hard cap)
-- [ ] Per-client statistics — track query patterns per client IP
+- [X] Per-client statistics — track query patterns per client IP
   (top domains, blocked vs allowed, qtype distribution) exposed
   via API
-- [ ] Split-horizon DNS — respond differently based on client network
+- [X] Split-horizon DNS — respond differently based on client network
   (e.g., internal clients see RFC1918 addresses, external clients
   see public IPs)
 

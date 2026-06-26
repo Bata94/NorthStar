@@ -199,12 +199,19 @@ type FileZoneRecordConfig struct {
 	NSECTypes      *[]uint16 `yaml:"nsec_types,omitempty"`
 }
 
+type FileZoneNSEC3Config struct {
+	Enabled    *bool   `yaml:"enabled"`
+	Iterations *uint16 `yaml:"iterations,omitempty"`
+	Salt       *string `yaml:"salt,omitempty"`
+	OptOut     *bool   `yaml:"opt_out,omitempty"`
+}
+
 type FileZoneDNSSECConfig struct {
-	Enabled   *bool   `yaml:"enabled"`
-	Algorithm *string `yaml:"algorithm"`
-	KeyFile   *string `yaml:"key_file,omitempty"`
-	ZSKFile   *string `yaml:"zsk_file,omitempty"`
-	NSEC3     *bool   `yaml:"nsec3,omitempty"`
+	Enabled   *bool                `yaml:"enabled"`
+	Algorithm *string              `yaml:"algorithm"`
+	KeyFile   *string              `yaml:"key_file,omitempty"`
+	ZSKFile   *string              `yaml:"zsk_file,omitempty"`
+	NSEC3     *FileZoneNSEC3Config `yaml:"nsec3,omitempty"`
 }
 
 type FileZoneViewConfig struct {
@@ -227,6 +234,10 @@ type FileACLConfig struct {
 	Zone     *string `yaml:"zone,omitempty"`
 	Protocol *string `yaml:"protocol,omitempty"`
 	Upstream *string `yaml:"upstream,omitempty"`
+}
+
+type FileEDNSConfig struct {
+	PaddingBlockSize *int `yaml:"padding_block_size"`
 }
 
 type FileConfig struct {
@@ -287,6 +298,7 @@ type FileConfig struct {
 	ACLs                 []FileACLConfig              `yaml:"acls,omitempty"`
 	Tracing              *FileTracingConfig           `yaml:"tracing"`
 	Hooks                *FileHookConfig              `yaml:"hooks"`
+	EDNS                 *FileEDNSConfig              `yaml:"edns,omitempty"`
 }
 
 func loadFile(path string) (*FileConfig, error) {
@@ -550,6 +562,11 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 	}
 	if fc.EcsPrefixV6 != nil {
 		cfg.EcsPrefixV6 = *fc.EcsPrefixV6
+	}
+	if fc.EDNS != nil {
+		if fc.EDNS.PaddingBlockSize != nil {
+			cfg.EDNSPaddingBlockSize = *fc.EDNS.PaddingBlockSize
+		}
 	}
 	if fc.Hooks != nil {
 		if fc.Hooks.RateLimiting.Enabled != nil {
@@ -862,6 +879,7 @@ func configToFile(cfg *Config) *FileConfig {
 	dns64Prefix := cfg.Dns64Prefix
 	ecsPrefixV4 := cfg.EcsPrefixV4
 	ecsPrefixV6 := cfg.EcsPrefixV6
+	ednsPaddingBlockSize := cfg.EDNSPaddingBlockSize
 	hookEnabled := cfg.Hooks.RateLimiting.Enabled
 	hookPriority := cfg.Hooks.RateLimiting.Priority
 	hookRate := cfg.Hooks.RateLimiting.Rate
@@ -991,17 +1009,31 @@ func configToFile(cfg *Config) *FileConfig {
 			Records: fileRecords,
 		}
 		if z.DNSSEC != nil {
-			fz.DNSSEC = &FileZoneDNSSECConfig{
+			fd := &FileZoneDNSSECConfig{
 				Enabled:   &z.DNSSEC.Enabled,
 				Algorithm: &z.DNSSEC.Algorithm,
-				NSEC3:     &z.DNSSEC.NSEC3,
+			}
+			if z.DNSSEC.NSEC3 != nil {
+				fd.NSEC3 = &FileZoneNSEC3Config{
+					Enabled: &z.DNSSEC.NSEC3.Enabled,
+				}
+				if z.DNSSEC.NSEC3.Iterations != 0 {
+					fd.NSEC3.Iterations = &z.DNSSEC.NSEC3.Iterations
+				}
+				if z.DNSSEC.NSEC3.Salt != "" {
+					fd.NSEC3.Salt = &z.DNSSEC.NSEC3.Salt
+				}
+				if z.DNSSEC.NSEC3.OptOut {
+					fd.NSEC3.OptOut = &z.DNSSEC.NSEC3.OptOut
+				}
 			}
 			if z.DNSSEC.KeyFile != "" {
-				fz.DNSSEC.KeyFile = &z.DNSSEC.KeyFile
+				fd.KeyFile = &z.DNSSEC.KeyFile
 			}
 			if z.DNSSEC.ZSKFile != "" {
-				fz.DNSSEC.ZSKFile = &z.DNSSEC.ZSKFile
+				fd.ZSKFile = &z.DNSSEC.ZSKFile
 			}
+			fz.DNSSEC = fd
 		}
 		if len(z.Views) > 0 {
 			fileViews := make([]FileZoneViewConfig, len(z.Views))
@@ -1111,6 +1143,9 @@ func configToFile(cfg *Config) *FileConfig {
 		Dns64Prefix:          &dns64Prefix,
 		EcsPrefixV4:          &ecsPrefixV4,
 		EcsPrefixV6:          &ecsPrefixV6,
+		EDNS: &FileEDNSConfig{
+			PaddingBlockSize: &ednsPaddingBlockSize,
+		},
 		Hooks: &FileHookConfig{
 			RateLimiting: FileRateLimitHookConfig{
 				Enabled:  &hookEnabled,
@@ -1289,7 +1324,20 @@ func applyFileZones(cfg *Config, fc *FileConfig) {
 				d.ZSKFile = *fz.DNSSEC.ZSKFile
 			}
 			if fz.DNSSEC.NSEC3 != nil {
-				d.NSEC3 = *fz.DNSSEC.NSEC3
+				n3 := &ZoneNSEC3Config{}
+				if fz.DNSSEC.NSEC3.Enabled != nil {
+					n3.Enabled = *fz.DNSSEC.NSEC3.Enabled
+				}
+				if fz.DNSSEC.NSEC3.Iterations != nil {
+					n3.Iterations = *fz.DNSSEC.NSEC3.Iterations
+				}
+				if fz.DNSSEC.NSEC3.Salt != nil {
+					n3.Salt = *fz.DNSSEC.NSEC3.Salt
+				}
+				if fz.DNSSEC.NSEC3.OptOut != nil {
+					n3.OptOut = *fz.DNSSEC.NSEC3.OptOut
+				}
+				d.NSEC3 = n3
 			}
 			cfg.Zones[i].DNSSEC = d
 		}

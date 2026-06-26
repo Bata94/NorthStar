@@ -271,6 +271,104 @@ func (r *NSECRecord) RData() ([]byte, error) {
 	return buf, nil
 }
 
+type NSEC3Record struct {
+	Name            string
+	TTLSec          uint32
+	HashAlgorithm   uint8
+	Flags           uint8
+	Iterations      uint16
+	Salt            []byte
+	NextHashedOwner []byte
+	Types           []uint16
+}
+
+func (r *NSEC3Record) DNSName() string { return r.Name }
+func (r *NSEC3Record) DNSType() uint16 { return dns.TypeNSEC3 }
+func (r *NSEC3Record) TTL() uint32     { return r.TTLSec }
+func (r *NSEC3Record) RData() ([]byte, error) {
+	buf := make([]byte, 5)
+	buf[0] = r.HashAlgorithm
+	buf[1] = r.Flags
+	binaryBigEndianPutUint16(buf[2:4], r.Iterations)
+	buf[4] = byte(len(r.Salt))
+	if len(r.Salt) > 0 {
+		buf = append(buf, r.Salt...)
+	}
+	buf = append(buf, byte(len(r.NextHashedOwner)))
+	buf = append(buf, r.NextHashedOwner...)
+	bitmap := makeTypeBitMap(r.Types)
+	buf = append(buf, bitmap...)
+	return buf, nil
+}
+
+type NSEC3PARAMRecord struct {
+	Name       string
+	TTLSec     uint32
+	Hash       uint8
+	Flags      uint8
+	Iterations uint16
+	Salt       []byte
+}
+
+func (r *NSEC3PARAMRecord) DNSName() string { return r.Name }
+func (r *NSEC3PARAMRecord) DNSType() uint16 { return dns.TypeNSEC3PARAM }
+func (r *NSEC3PARAMRecord) TTL() uint32     { return r.TTLSec }
+func (r *NSEC3PARAMRecord) RData() ([]byte, error) {
+	buf := make([]byte, 5)
+	buf[0] = r.Hash
+	buf[1] = r.Flags
+	binaryBigEndianPutUint16(buf[2:4], r.Iterations)
+	buf[4] = byte(len(r.Salt))
+	if len(r.Salt) > 0 {
+		buf = append(buf, r.Salt...)
+	}
+	return buf, nil
+}
+
+func makeTypeBitMap(types []uint16) []byte {
+	if len(types) == 0 {
+		return nil
+	}
+	maxWindow := uint16(0)
+	for _, t := range types {
+		if w := t / 256; w > maxWindow {
+			maxWindow = w
+		}
+	}
+	var blocks [][]byte
+	for w := uint16(0); w <= maxWindow; w++ {
+		var bitmap [32]byte
+		hasType := false
+		maxOffset := 0
+		for _, t := range types {
+			if t/256 != w {
+				continue
+			}
+			offset := int((t % 256) / 8)
+			bit := 7 - int(t%8)
+			bitmap[offset] |= 1 << bit
+			if offset > maxOffset {
+				maxOffset = offset
+			}
+			hasType = true
+		}
+		if !hasType {
+			continue
+		}
+		blockLen := maxOffset + 1
+		block := make([]byte, 2+blockLen)
+		block[0] = byte(w)
+		block[1] = byte(blockLen)
+		copy(block[2:], bitmap[:blockLen])
+		blocks = append(blocks, block)
+	}
+	var out []byte
+	for _, b := range blocks {
+		out = append(out, b...)
+	}
+	return out
+}
+
 type DNSSECConfig struct {
 	Enabled   bool
 	Algorithm uint8

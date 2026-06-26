@@ -8,14 +8,15 @@ import (
 )
 
 type RuntimeConfig struct {
-	RateLimit      atomic.Int64
-	StaleAge       atomic.Int64
-	NegativeTTL    atomic.Int64
-	NegativeTTLMin atomic.Int64
-	TTLMin         atomic.Int64
-	TTLMax         atomic.Int64
-	LogLevel       atomic.Value
-	LogMode        atomic.Value
+	RateLimit        atomic.Int64
+	StaleAge         atomic.Int64
+	NegativeTTL      atomic.Int64
+	NegativeTTLMin   atomic.Int64
+	TTLMin           atomic.Int64
+	TTLMax           atomic.Int64
+	PaddingBlockSize atomic.Int64
+	LogLevel         atomic.Value
+	LogMode          atomic.Value
 }
 
 func NewRuntimeConfig(cfg *Config) *RuntimeConfig {
@@ -31,6 +32,7 @@ func (rc *RuntimeConfig) ApplyConfig(cfg *Config) {
 	rc.NegativeTTLMin.Store(int64(cfg.NegativeTTLMin))
 	rc.TTLMin.Store(int64(cfg.TTLMin))
 	rc.TTLMax.Store(int64(cfg.TTLMax))
+	rc.PaddingBlockSize.Store(int64(cfg.EDNSPaddingBlockSize))
 	rc.LogLevel.Store(cfg.LogLevel)
 	rc.LogMode.Store(cfg.LogMode)
 }

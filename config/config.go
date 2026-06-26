@@ -192,12 +192,19 @@ type ZoneRecordConfig struct {
 	NSECTypes      *[]uint16 `yaml:"nsec_types,omitempty"`
 }
 
+type ZoneNSEC3Config struct {
+	Enabled    bool   `yaml:"enabled"`
+	Iterations uint16 `yaml:"iterations,omitempty"`
+	Salt       string `yaml:"salt,omitempty"` // hex-encoded; empty = auto-generate
+	OptOut     bool   `yaml:"opt_out,omitempty"`
+}
+
 type ZoneDNSSECConfig struct {
-	Enabled   bool   `yaml:"enabled"`
-	Algorithm string `yaml:"algorithm"`
-	KeyFile   string `yaml:"key_file,omitempty"`
-	ZSKFile   string `yaml:"zsk_file,omitempty"`
-	NSEC3     bool   `yaml:"nsec3"`
+	Enabled   bool             `yaml:"enabled"`
+	Algorithm string           `yaml:"algorithm"`
+	KeyFile   string           `yaml:"key_file,omitempty"`
+	ZSKFile   string           `yaml:"zsk_file,omitempty"`
+	NSEC3     *ZoneNSEC3Config `yaml:"nsec3,omitempty"`
 }
 
 type ZoneViewConfig struct {
@@ -292,6 +299,7 @@ type Config struct {
 	EcsPrefixV6          int    // source prefix length for IPv6 (default 56)
 	Zones                []ZoneConfig
 	ACLs                 []ACLConfig
+	EDNSPaddingBlockSize int // EDNS padding block size; 0 = disabled, 128/256 typical
 	ReusePort            bool
 	ReusePortWorkers     int
 	RateLimitFailClose   bool
@@ -359,6 +367,7 @@ func Load() Config {
 		Dns64Prefix:          "64:ff9b::/96",
 		EcsPrefixV4:          24,
 		EcsPrefixV6:          56,
+		EDNSPaddingBlockSize: 0,
 		ReusePort:            true,
 		ReusePortWorkers:     0,
 		RateLimitFailClose:   false,
@@ -525,6 +534,7 @@ func Reload() (Config, error) {
 		Dns64Prefix:          "64:ff9b::/96",
 		EcsPrefixV4:          24,
 		EcsPrefixV6:          56,
+		EDNSPaddingBlockSize: 0,
 		ReusePort:            true,
 		ReusePortWorkers:     0,
 		RateLimitFailClose:   false,
@@ -840,6 +850,9 @@ func applyEnvOverrides(cfg *Config) {
 	// ConfigPath override (not from file, directly via env)
 	if v, ok := os.LookupEnv("NORTHSTAR_CONFIG"); ok {
 		cfg.ConfigPath = v
+	}
+	if v, ok := os.LookupEnv("NORTHSTAR_EDNS_PADDING_BLOCK_SIZE"); ok {
+		cfg.EDNSPaddingBlockSize = atoiOrZero(v)
 	}
 	if v, ok := os.LookupEnv("NORTHSTAR_TRACING_ENABLE"); ok {
 		cfg.Tracing.Enable = isTrue(v)

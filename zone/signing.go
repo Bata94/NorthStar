@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha1"
 	"crypto/x509"
 	"encoding/binary"
 	"encoding/pem"
@@ -13,6 +14,7 @@ import (
 	"math/big"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/bata94/northstar/dns"
@@ -289,6 +291,194 @@ func BuildDNSKEYRecord(name string, key crypto.Signer, algorithm uint8, ttl uint
 	}
 }
 
+// NSEC3Hash computes the salted, iterated SHA-1 hash of a domain name
+// per RFC 5155 §5.
+func NSEC3Hash(name string, salt []byte, iterations uint16) ([]byte, error) {
+	// Canonical wire form: lowercased, uncompressed labels (RFC 5155 §5)
+	wire := EncodeName(strings.ToLower(name))
+	h := sha1.New()
+	h.Write(wire)
+	if len(salt) > 0 {
+		h.Write(salt)
+	}
+	prev := h.Sum(nil)
+	for i := uint16(0); i < iterations; i++ {
+		h.Reset()
+		h.Write(prev)
+		if len(salt) > 0 {
+			h.Write(salt)
+		}
+		prev = h.Sum(nil)
+	}
+	return prev, nil
+}
+
+// Base32HexEncode encodes bytes to lowercase base32hex (RFC 4648 §7, no padding).
+func Base32HexEncode(data []byte) string {
+	const enc = "0123456789abcdefghijklmnopqrstuv"
+	var out []byte
+	bits := 0
+	val := 0
+	for _, b := range data {
+		val = (val << 8) | int(b)
+		bits += 8
+		for bits >= 5 {
+			bits -= 5
+			out = append(out, enc[(val>>bits)&0x1F])
+		}
+	}
+	if bits > 0 {
+		out = append(out, enc[(val<<(5-bits))&0x1F])
+	}
+	return string(out)
+}
+
+// Base32HexDecode decodes lowercase base32hex (RFC 4648 §7, no padding).
+func Base32HexDecode(s string) ([]byte, error) {
+	var out []byte
+	bits := 0
+	val := 0
+	for _, c := range []byte(s) {
+		var v int
+		switch {
+		case c >= '0' && c <= '9':
+			v = int(c - '0')
+		case c >= 'a' && c <= 'v':
+			v = int(c - 'a' + 10)
+		case c >= 'A' && c <= 'V':
+			v = int(c - 'A' + 10)
+		default:
+			return nil, fmt.Errorf("invalid base32hex char: %c", c)
+		}
+		val = (val << 5) | v
+		bits += 5
+		if bits >= 8 {
+			bits -= 8
+			out = append(out, byte(val>>bits))
+			val &= (1 << bits) - 1
+		}
+	}
+	return out, nil
+}
+
+// BuildNSEC3Chain builds an NSEC3 chain for the zone.
+// The salt is hex-decoded from the config; pass the raw bytes.
+func BuildNSEC3Chain(zone *Zone, iterations uint16, salt []byte, optOut bool) []*NSEC3Record {
+	if len(zone.byName) == 0 {
+		return nil
+	}
+	type hashEntry struct {
+		hash  []byte
+		name  string
+		types []uint16
+	}
+	var entries []hashEntry
+	for name, records := range zone.byName {
+		if name == zone.Name {
+			continue
+		}
+		h, err := NSEC3Hash(name, salt, iterations)
+		if err != nil {
+			continue
+		}
+		typeSet := make(map[uint16]bool)
+		for _, r := range records {
+			t := r.DNSType()
+			if t == dns.TypeNSEC3 || t == dns.TypeNSEC3PARAM || t == dns.TypeRRSIG {
+				continue
+			}
+			typeSet[t] = true
+		}
+		var types []uint16
+		for t := range typeSet {
+			types = append(types, t)
+		}
+		sort.Slice(types, func(i, j int) bool { return types[i] < types[j] })
+		entries = append(entries, hashEntry{hash: h, name: name, types: types})
+	}
+	// Also hash the zone apex name
+	apexHash, err := NSEC3Hash(zone.Name, salt, iterations)
+	if err == nil {
+		apexTypes := make(map[uint16]bool)
+		for _, r := range zone.byName[zone.Name] {
+			t := r.DNSType()
+			if t == dns.TypeNSEC3 || t == dns.TypeNSEC3PARAM || t == dns.TypeRRSIG {
+				continue
+			}
+			apexTypes[t] = true
+		}
+		var types []uint16
+		for t := range apexTypes {
+			types = append(types, t)
+		}
+		sort.Slice(types, func(i, j int) bool { return types[i] < types[j] })
+		entries = append(entries, hashEntry{hash: apexHash, name: zone.Name, types: types})
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return compareHashes(entries[i].hash, entries[j].hash) < 0
+	})
+	flags := uint8(0)
+	if optOut {
+		flags |= 0x01
+	}
+	var chain []*NSEC3Record
+	for i, entry := range entries {
+		nextHash := entries[0].hash
+		if i+1 < len(entries) {
+			nextHash = entries[i+1].hash
+		}
+		encodedName := Base32HexEncode(entry.hash) + "." + zone.Name
+		chain = append(chain, &NSEC3Record{
+			Name:            encodedName,
+			TTLSec:          zone.SOA().TTLSec,
+			HashAlgorithm:   1,
+			Flags:           flags,
+			Iterations:      iterations,
+			Salt:            salt,
+			NextHashedOwner: nextHash,
+			Types:           entry.types,
+		})
+	}
+	return chain
+}
+
+func compareHashes(a, b []byte) int {
+	minLen := len(a)
+	if len(b) < minLen {
+		minLen = len(b)
+	}
+	for i := 0; i < minLen; i++ {
+		if a[i] < b[i] {
+			return -1
+		}
+		if a[i] > b[i] {
+			return 1
+		}
+	}
+	if len(a) < len(b) {
+		return -1
+	}
+	if len(a) > len(b) {
+		return 1
+	}
+	return 0
+}
+
+// BuildNSEC3PARAMRecord creates the NSEC3PARAM record for the zone apex.
+func BuildNSEC3PARAMRecord(zone *Zone, iterations uint16, salt []byte) *NSEC3PARAMRecord {
+	return &NSEC3PARAMRecord{
+		Name:       zone.Name,
+		TTLSec:     zone.SOA().TTLSec,
+		Hash:       1,
+		Flags:      0,
+		Iterations: iterations,
+		Salt:       salt,
+	}
+}
+
 func BuildNSECChain(zone *Zone) []*NSECRecord {
 	if len(zone.byName) == 0 {
 		return nil
@@ -430,19 +620,47 @@ func AttachDNSSEC(zone *Zone, resp *dns.Message, req *dns.Message, key crypto.Si
 	// Add RRSIGs for negative responses (authority SOA)
 	respRrsigs := addlRRSIGs
 
-	// Build NSEC chain and include if NXDOMAIN
+	// Build NSEC(3) chain and include if NXDOMAIN
 	if resp.Header.Flags&0x000F == 3 {
-		nsecChain := BuildNSECChain(zone)
-		for _, nsec := range nsecChain {
-			rdata, _ := nsec.RData()
-			resp.Authorities = append(resp.Authorities, dns.ResourceRecord{
-				Name:     nsec.DNSName(),
-				Type:     dns.TypeNSEC,
+		if zone.DNSSEC.NSEC3 {
+			iterations := uint16(0)
+			var salt []byte
+			nsec3Chain := BuildNSEC3Chain(zone, iterations, salt, false)
+			for _, nsec3 := range nsec3Chain {
+				rdata, _ := nsec3.RData()
+				resp.Authorities = append(resp.Authorities, dns.ResourceRecord{
+					Name:     nsec3.DNSName(),
+					Type:     dns.TypeNSEC3,
+					Class:    1,
+					TTL:      nsec3.TTL(),
+					RDLength: uint16(len(rdata)),
+					RData:    rdata,
+				})
+			}
+			// Include NSEC3PARAM in additional section per RFC 5155 §3
+			param := BuildNSEC3PARAMRecord(zone, iterations, salt)
+			prdata, _ := param.RData()
+			resp.Additionals = append(resp.Additionals, dns.ResourceRecord{
+				Name:     param.DNSName(),
+				Type:     dns.TypeNSEC3PARAM,
 				Class:    1,
-				TTL:      nsec.TTL(),
-				RDLength: uint16(len(rdata)),
-				RData:    rdata,
+				TTL:      param.TTL(),
+				RDLength: uint16(len(prdata)),
+				RData:    prdata,
 			})
+		} else {
+			nsecChain := BuildNSECChain(zone)
+			for _, nsec := range nsecChain {
+				rdata, _ := nsec.RData()
+				resp.Authorities = append(resp.Authorities, dns.ResourceRecord{
+					Name:     nsec.DNSName(),
+					Type:     dns.TypeNSEC,
+					Class:    1,
+					TTL:      nsec.TTL(),
+					RDLength: uint16(len(rdata)),
+					RData:    rdata,
+				})
+			}
 		}
 	}
 

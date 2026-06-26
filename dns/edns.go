@@ -9,10 +9,29 @@ import (
 )
 
 const (
-	EDNS0OptionECS = 8
-	ECSFamilyIPv4  = 1
-	ECSFamilyIPv6  = 2
+	EDNS0OptionECS     = 8
+	EDNS0OptionPadding = 12
+	ECSFamilyIPv4      = 1
+	ECSFamilyIPv6      = 2
 )
+
+// BuildPaddingOption returns an EDNS0 padding option (code 12) that pads the
+// existing OPT RData so that currentLen + 4 (header) + padLen reaches the next
+// multiple of blockSize. Returns nil if blockSize <= 1.
+func BuildPaddingOption(currentLen int, blockSize int) []byte {
+	if blockSize <= 1 {
+		return nil
+	}
+	total := currentLen + 4
+	if total%blockSize == 0 {
+		return nil
+	}
+	padLen := blockSize - (total % blockSize)
+	opt := make([]byte, 4+padLen)
+	binary.BigEndian.PutUint16(opt[0:2], EDNS0OptionPadding)
+	binary.BigEndian.PutUint16(opt[2:4], uint16(padLen))
+	return opt
+}
 
 func BuildECSOption(clientIP string, sourcePrefixLen int) []byte {
 	ip := net.ParseIP(clientIP)

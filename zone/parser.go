@@ -53,12 +53,13 @@ func ParseZoneConfig(cfg config.ZoneConfig) (*Zone, error) {
 	var signingKey crypto.Signer
 	if cfg.DNSSEC != nil && cfg.DNSSEC.Enabled {
 		alg := algorithmFromString(cfg.DNSSEC.Algorithm)
+		nsec3Enabled := cfg.DNSSEC.NSEC3 != nil && cfg.DNSSEC.NSEC3.Enabled
 		dnssec = &DNSSECConfig{
 			Enabled:   cfg.DNSSEC.Enabled,
 			Algorithm: alg,
 			KeyFile:   cfg.DNSSEC.KeyFile,
 			ZSKFile:   cfg.DNSSEC.ZSKFile,
-			NSEC3:     cfg.DNSSEC.NSEC3,
+			NSEC3:     nsec3Enabled,
 		}
 		if cfg.DNSSEC.KeyFile != "" {
 			var lerr error
@@ -210,6 +211,25 @@ func parseRecordConfig(rc config.ZoneRecordConfig, zone string) ([]Record, error
 			PublicKey: []byte(*rc.DNSKEYPublicKey),
 		}}, nil
 
+	case "NSEC3":
+		if rc.NSECNextDomain == nil || rc.NSECTypes == nil {
+			return nil, fmt.Errorf("nsec3 record requires nsec_next_domain and nsec_types fields")
+		}
+		nextDomain := *rc.NSECNextDomain
+		if nextDomain[len(nextDomain)-1] != '.' {
+			nextDomain += "."
+		}
+		return []Record{&NSEC3Record{
+			Name:            owner,
+			TTLSec:          ttl,
+			HashAlgorithm:   1,
+			Flags:           0,
+			Iterations:      0,
+			Salt:            nil,
+			NextHashedOwner: []byte(nextDomain),
+			Types:           *rc.NSECTypes,
+		}}, nil
+
 	case "RRSIG":
 		if rc.RRSIGTypeCovered == nil || rc.RRSIGAlgorithm == nil || rc.RRSIGLabels == nil ||
 			rc.RRSIGOriginalTTL == nil || rc.RRSIGExpiration == nil || rc.RRSIGInception == nil ||
@@ -259,13 +279,16 @@ func ZoneConfigFromZone(z *Zone) config.ZoneConfig {
 	}
 	if z.DNSSEC != nil && z.DNSSEC.Enabled {
 		alg := algorithmString(z.DNSSEC.Algorithm)
-		cfg.DNSSEC = &config.ZoneDNSSECConfig{
+		zc := &config.ZoneDNSSECConfig{
 			Enabled:   true,
 			Algorithm: alg,
 			KeyFile:   z.DNSSEC.KeyFile,
 			ZSKFile:   z.DNSSEC.ZSKFile,
-			NSEC3:     z.DNSSEC.NSEC3,
 		}
+		if z.DNSSEC.NSEC3 {
+			zc.NSEC3 = &config.ZoneNSEC3Config{Enabled: true}
+		}
+		cfg.DNSSEC = zc
 	}
 	return cfg
 }

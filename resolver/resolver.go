@@ -475,7 +475,22 @@ func processQuery(ctx context.Context, req *dns.Message, network, clientIP strin
 		return
 	}
 
+	paddingBlockSize := int(runtimeCfg.PaddingBlockSize.Load())
 	respPacked := packResponseWithTruncation(&resp, maxPayload)
+	if paddingBlockSize > 0 && len(respPacked) <= int(maxPayload) {
+		for i := range resp.Additionals {
+			if resp.Additionals[i].Type == dns.TypeOPT {
+				curLen := len(resp.Additionals[i].RData)
+				if padding := dns.BuildPaddingOption(curLen, paddingBlockSize); padding != nil {
+					resp.Additionals[i].RData = append(resp.Additionals[i].RData, padding...)
+					resp.Additionals[i].RDLength = uint16(len(resp.Additionals[i].RData))
+					resp.Header.ARCount = uint16(len(resp.Additionals))
+				}
+				break
+			}
+		}
+		respPacked = packResponseWithTruncation(&resp, maxPayload)
+	}
 	if len(respPacked) > int(maxPayload) {
 		slog.Warn("Response truncated (no records fit)", "domain", q.Name, "size", len(respPacked), "max", maxPayload)
 	}
@@ -648,7 +663,7 @@ func handleRequest(ctx context.Context, data []byte, remoteAddr *net.UDPAddr, co
 	processQuery(ctx, &req, "udp", clientIP, maxPayload, do, version, send, group, c, runtimeCfg, m)
 }
 
-func fetchFromUpstream(ctx context.Context, domain string, qtype uint16, maxPayload uint16, network string, u *upstream.Upstream, do bool, m *metrics.Metrics, ttlMin, ttlMax, negativeTTLMin, negativeTTLCap int, ecsData []byte) (*cache.Entry, error) {
+func fetchFromUpstream(ctx context.Context, domain string, qtype uint16, maxPayload uint16, network string, u *upstream.Upstream, do bool, m *metrics.Metrics, ttlMin, ttlMax, negativeTTLMin, negativeTTLCap int, ecsData []byte, paddingBlockSize int) (*cache.Entry, error) {
 	start := time.Now()
 	defer func() {
 		m.UpstreamLatency.WithLabelValues(u.Name).Observe(time.Since(start).Seconds())
@@ -676,6 +691,11 @@ func fetchFromUpstream(ctx context.Context, domain string, qtype uint16, maxPayl
 		optTTL |= 0x00008000
 	}
 	optRdata := append([]byte(nil), ecsData...)
+	if paddingBlockSize > 0 {
+		if padding := dns.BuildPaddingOption(len(optRdata), paddingBlockSize); padding != nil {
+			optRdata = append(optRdata, padding...)
+		}
+	}
 
 	msg := dns.Message{
 		Header: dns.Header{
@@ -832,7 +852,7 @@ func fetchFromUpstream(ctx context.Context, domain string, qtype uint16, maxPayl
 	return entry, nil
 }
 
-func refreshCache(call *inflightCall, ikey inflightKey, domain string, qtype uint16, c cache.Cache, maxPayload uint16, network string, group *upstream.Group, do bool, m *metrics.Metrics, ttlMin, ttlMax, negativeTTLMin, negativeTTLCap int, ecsData []byte) {
+func refreshCache(call *inflightCall, ikey inflightKey, domain string, qtype uint16, c cache.Cache, maxPayload uint16, network string, group *upstream.Group, do bool, m *metrics.Metrics, ttlMin, ttlMax, negativeTTLMin, negativeTTLCap int, ecsData []byte, paddingBlockSize int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -847,7 +867,7 @@ func refreshCache(call *inflightCall, ikey inflightKey, domain string, qtype uin
 		return
 	}
 
-	entry, err := fetchFromUpstream(ctx, domain, qtype, maxPayload, network, u, do, m, ttlMin, ttlMax, negativeTTLMin, negativeTTLCap, ecsData)
+	entry, err := fetchFromUpstream(ctx, domain, qtype, maxPayload, network, u, do, m, ttlMin, ttlMax, negativeTTLMin, negativeTTLCap, ecsData, paddingBlockSize)
 	if err == nil {
 		if err := c.Set(ctx, entry); err != nil {
 			slog.Error("Background refresh cache set failed", "domain", domain, "type", qtype, "error", err)
@@ -913,7 +933,8 @@ func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.G
 					staleLockKey := fmt.Sprintf("northstar:inflight:stale:%s:%d", domain, qtype)
 					locked, lErr := c.TryLock(ctx, staleLockKey, 5*time.Second)
 					if lErr == nil && locked {
-						go refreshCache(call, ikey, domain, qtype, c, maxPayload, network, group, do, m, ttlMin, ttlMax, negativeTTLMin, negativeTTL, ecsData)
+						pbSize := int(runtimeCfg.PaddingBlockSize.Load())
+						go refreshCache(call, ikey, domain, qtype, c, maxPayload, network, group, do, m, ttlMin, ttlMax, negativeTTLMin, negativeTTL, ecsData, pbSize)
 					} else {
 						if lErr != nil {
 							slog.Error("Stale refresh lock error", "error", lErr)
@@ -1012,10 +1033,11 @@ func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.G
 		return nil, "", err
 	}
 
+	pbSize := int(runtimeCfg.PaddingBlockSize.Load())
 	var upstreamName string
 	if len(selectedUpstreams) == 1 {
 		u := selectedUpstreams[0]
-		entry, err = fetchFromUpstream(ctx, domain, qtype, maxPayload, network, u, do, m, ttlMin, ttlMax, negativeTTLMin, negativeTTL, ecsData)
+		entry, err = fetchFromUpstream(ctx, domain, qtype, maxPayload, network, u, do, m, ttlMin, ttlMax, negativeTTLMin, negativeTTL, ecsData, pbSize)
 		if err != nil {
 			u.ReportFailure()
 			m.UpstreamFails.WithLabelValues(u.Name).Inc()
@@ -1024,7 +1046,7 @@ func resolve(ctx context.Context, domain string, qtype uint16, group *upstream.G
 		}
 		upstreamName = u.Name
 	} else {
-		entry, upstreamName, err = raceUpstreams(ctx, domain, qtype, maxPayload, network, selectedUpstreams, group, do, m, ttlMin, ttlMax, negativeTTLMin, negativeTTL, ecsData)
+		entry, upstreamName, err = raceUpstreams(ctx, domain, qtype, maxPayload, network, selectedUpstreams, group, do, m, ttlMin, ttlMax, negativeTTLMin, negativeTTL, ecsData, pbSize)
 		cacheDecision = "race"
 		if err != nil {
 			call.err = err
@@ -1056,7 +1078,7 @@ func StartCachePrefetch(ctx context.Context, c cache.Cache, m *metrics.Metrics, 
 	}, resolveFn)
 }
 
-func raceUpstreams(ctx context.Context, domain string, qtype uint16, maxPayload uint16, network string, upstreams []*upstream.Upstream, group *upstream.Group, do bool, m *metrics.Metrics, ttlMin, ttlMax, negativeTTLMin, negativeTTLCap int, ecsData []byte) (*cache.Entry, string, error) {
+func raceUpstreams(ctx context.Context, domain string, qtype uint16, maxPayload uint16, network string, upstreams []*upstream.Upstream, group *upstream.Group, do bool, m *metrics.Metrics, ttlMin, ttlMax, negativeTTLMin, negativeTTLCap int, ecsData []byte, paddingBlockSize int) (*cache.Entry, string, error) {
 	type raceResult struct {
 		entry *cache.Entry
 		name  string
@@ -1069,7 +1091,7 @@ func raceUpstreams(ctx context.Context, domain string, qtype uint16, maxPayload 
 	for _, u := range upstreams {
 		u := u
 		go func() {
-			entry, err := fetchFromUpstream(raceCtx, domain, qtype, maxPayload, network, u, do, m, ttlMin, ttlMax, negativeTTLMin, negativeTTLCap, ecsData)
+			entry, err := fetchFromUpstream(raceCtx, domain, qtype, maxPayload, network, u, do, m, ttlMin, ttlMax, negativeTTLMin, negativeTTLCap, ecsData, paddingBlockSize)
 			select {
 			case resultCh <- raceResult{entry, u.Name, err}:
 			case <-raceCtx.Done():

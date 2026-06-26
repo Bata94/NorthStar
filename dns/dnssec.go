@@ -354,6 +354,117 @@ func hashSum(h crypto.Hash, data []byte) []byte {
 	return hh.Sum(nil)
 }
 
+type NSEC3 struct {
+	HashAlgorithm   uint8
+	Flags           uint8
+	Iterations      uint16
+	Salt            []byte
+	NextHashedOwner []byte
+	TypeBitMaps     []uint16
+}
+
+type NSEC3PARAM struct {
+	Hash       uint8
+	Flags      uint8
+	Iterations uint16
+	Salt       []byte
+}
+
+func ParseNSEC3(rr *ResourceRecord) (*NSEC3, error) {
+	if rr.Type != TypeNSEC3 {
+		return nil, errors.New("dns: not an NSEC3 record")
+	}
+	data := rr.RData
+	if len(data) < 5 {
+		return nil, errors.New("dns: NSEC3 too short")
+	}
+	nsec3 := &NSEC3{
+		HashAlgorithm: data[0],
+		Flags:         data[1],
+		Iterations:    binary.BigEndian.Uint16(data[2:4]),
+	}
+	saltLen := int(data[4])
+	off := 5
+	if saltLen > 0 {
+		if off+saltLen > len(data) {
+			return nil, errors.New("dns: NSEC3 salt truncated")
+		}
+		nsec3.Salt = make([]byte, saltLen)
+		copy(nsec3.Salt, data[off:off+saltLen])
+		off += saltLen
+	}
+	if off >= len(data) {
+		return nil, errors.New("dns: NSEC3 truncated after salt")
+	}
+	hashLen := int(data[off])
+	off++
+	if hashLen == 0 || off+hashLen > len(data) {
+		return nil, errors.New("dns: NSEC3 hash length invalid")
+	}
+	nsec3.NextHashedOwner = make([]byte, hashLen)
+	copy(nsec3.NextHashedOwner, data[off:off+hashLen])
+	off += hashLen
+	if off < len(data) {
+		bitmap, err := parseTypeBitMaps(data[off:])
+		if err != nil {
+			return nil, err
+		}
+		nsec3.TypeBitMaps = bitmap
+	}
+	return nsec3, nil
+}
+
+func ParseNSEC3PARAM(rr *ResourceRecord) (*NSEC3PARAM, error) {
+	if rr.Type != TypeNSEC3PARAM {
+		return nil, errors.New("dns: not an NSEC3PARAM record")
+	}
+	data := rr.RData
+	if len(data) < 5 {
+		return nil, errors.New("dns: NSEC3PARAM too short")
+	}
+	param := &NSEC3PARAM{
+		Hash:       data[0],
+		Flags:      data[1],
+		Iterations: binary.BigEndian.Uint16(data[2:4]),
+	}
+	saltLen := int(data[4])
+	if saltLen > 0 {
+		if 5+saltLen > len(data) {
+			return nil, errors.New("dns: NSEC3PARAM salt truncated")
+		}
+		param.Salt = make([]byte, saltLen)
+		copy(param.Salt, data[5:5+saltLen])
+	}
+	return param, nil
+}
+
+func parseTypeBitMaps(data []byte) ([]uint16, error) {
+	var types []uint16
+	off := 0
+	for off < len(data) {
+		if off+2 > len(data) {
+			return nil, errors.New("dns: truncated type bitmap window")
+		}
+		window := int(data[off])
+		blockLen := int(data[off+1])
+		off += 2
+		if blockLen == 0 || off+blockLen > len(data) {
+			return nil, errors.New("dns: truncated type bitmap block")
+		}
+		for i := 0; i < blockLen; i++ {
+			b := data[off+i]
+			for bit := 0; bit < 8; bit++ {
+				if b&(1<<(7-bit)) != 0 {
+					rtype := uint16(window*256 + i*8 + bit)
+					types = append(types, rtype)
+				}
+			}
+		}
+		off += blockLen
+	}
+	return types, nil
+}
+
 func VerifyDS(ds *DS, dnskey *DNSKEY, owner string) error {
 	var digest []byte
 	switch ds.DigestType {
