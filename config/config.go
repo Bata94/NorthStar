@@ -18,6 +18,38 @@ type Listener struct {
 	ReusePort bool
 }
 
+func ResolveConfigPath() (path string, isTOML bool) {
+	path = "./northstar.yaml"
+	if v, ok := os.LookupEnv("NORTHSTAR_CONFIG"); ok && v != "" {
+		path = v
+	}
+	isTOML = strings.HasSuffix(path, ".toml") || strings.HasSuffix(path, ".TOML")
+	return
+}
+
+func loadAnyFile(path string) (*FileConfig, error) {
+	if strings.HasSuffix(path, ".toml") || strings.HasSuffix(path, ".TOML") {
+		fcTOML, err := loadFileTOML(path)
+		if err != nil {
+			return nil, err
+		}
+		return tomlConfigToFileConfig(fcTOML), nil
+	}
+	return loadFile(path)
+}
+
+func loadAnyFileWithFallback(path string, isTOML bool) *FileConfig {
+	if fc, err := loadAnyFile(path); err == nil {
+		return fc
+	}
+	if !isTOML {
+		if fc, err := loadFile("./northstar.toml"); err == nil {
+			return fc
+		}
+	}
+	return nil
+}
+
 type RateLimitHookConfig struct {
 	Enabled  bool
 	Priority int
@@ -340,10 +372,7 @@ type Config struct {
 func Load() Config {
 	loadDotEnv()
 
-	cfgPath := "./northstar.yaml"
-	if v, ok := os.LookupEnv("NORTHSTAR_CONFIG"); ok && v != "" {
-		cfgPath = v
-	}
+	cfgPath, _ := ResolveConfigPath()
 
 	cfg := Config{
 		ConfigPath:   cfgPath,
@@ -490,7 +519,7 @@ func Load() Config {
 		},
 	}
 
-	if fc, err := loadFile(cfgPath); err == nil {
+	if fc := loadAnyFileWithFallback(cfgPath, false); fc != nil {
 		applyFileConfig(&cfg, fc)
 		applyFileZones(&cfg, fc)
 		applyFileACLs(&cfg, fc)
@@ -515,10 +544,7 @@ func Load() Config {
 func Reload() (Config, error) {
 	loadDotEnv()
 
-	cfgPath := "./northstar.yaml"
-	if v, ok := os.LookupEnv("NORTHSTAR_CONFIG"); ok && v != "" {
-		cfgPath = v
-	}
+	cfgPath, isTOML := ResolveConfigPath()
 
 	cfg := Config{
 		ConfigPath:   cfgPath,
@@ -665,7 +691,7 @@ func Reload() (Config, error) {
 		},
 	}
 
-	if fc, err := loadFile(cfgPath); err == nil {
+	if fc := loadAnyFileWithFallback(cfgPath, isTOML); fc != nil {
 		applyFileConfig(&cfg, fc)
 		applyFileZones(&cfg, fc)
 		applyFileACLs(&cfg, fc)

@@ -34,18 +34,27 @@ import (
 var Version = "dev"
 
 func main() {
-	cfgPath := "./northstar.yaml"
-	if v, ok := os.LookupEnv("NORTHSTAR_CONFIG"); ok && v != "" {
-		cfgPath = v
+	if len(os.Args) > 1 && os.Args[1] == "check-config" {
+		os.Exit(config.ValidateAndExit())
 	}
+
+	cfgPath, isTOML := config.ResolveConfigPath()
 
 	cfg := config.Load()
 
 	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
-		if wErr := config.WriteEffectiveConfig(cfgPath, &cfg); wErr != nil {
-			slog.Error("Failed to write default config", "error", wErr)
+		if isTOML {
+			if wErr := config.WriteDefaultConfigTOML(cfgPath); wErr != nil {
+				slog.Error("Failed to write default TOML config", "error", wErr)
+			} else {
+				slog.Info("Generated default TOML config file", "path", cfgPath)
+			}
 		} else {
-			slog.Info("Generated default config file", "path", cfgPath, "mode", cfg.Mode)
+			if wErr := config.WriteEffectiveConfig(cfgPath, &cfg); wErr != nil {
+				slog.Error("Failed to write default config", "error", wErr)
+			} else {
+				slog.Info("Generated default config file", "path", cfgPath, "mode", cfg.Mode)
+			}
 		}
 	}
 

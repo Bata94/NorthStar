@@ -86,9 +86,9 @@
 - [X] YAML config file — single source of truth with env var
   override hierarchy (file < env var < API)
 - [X] Hot-reload on SIGHUP — re-read config file without restart
-- [ ] Configuration validation command — `northstar check-config` to
+- [X] Configuration validation command — `northstar check-config` to
   validate the config file before starting the server
-- [ ] TOML config file support — alternative to YAML with identical
+- [X] TOML config file support — alternative to YAML with identical
   field mapping and env var override hierarchy
 
 ## Middleware & Hooks System
@@ -577,24 +577,11 @@ Phase 10 (multi-node deployment to benefit from tracing)
 
 **Goal:** Better developer and operator ergonomics.
 
-- [ ] Configuration validation command — `northstar check-config`
+- [X] Configuration validation command — `northstar check-config`
   that validates the YAML config file and reports all errors
   before the server starts
-- [ ] TOML config file support — add TOML as an alternative config
+- [X] TOML config file support — add TOML as an alternative config
   format with identical field mapping, override hierarchy, and
   auto-generation
 
 **Depends on:** Phase 1 (config system)
-
----
-
-## Phase 21: Advanced / Nice-to-Have
-
-**Goal:** Power-user features for custom logic and environment integration.
-
-- [ ] Lua scripting for custom logic — embed a Lua runtime with
-  hooks exposed at all lifecycle points (pre-resolve, post-resolve,
-  pre-response, post-response) for arbitrary query manipulation
-  without recompiling the server
-
-**Depends on:** Phase 1 (hooks pipeline)

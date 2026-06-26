@@ -45,6 +45,9 @@ clean:
 	rm -rf ./northstar
 	rm -rf ./*.log
 
+check-config:
+	go run . check-config
+
 check:
   just fmt
   just lint
